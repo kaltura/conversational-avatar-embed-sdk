@@ -24,7 +24,7 @@
  * Update these values for different deployments.
  */
 const CONFIG = Object.freeze({
-    VERSION: '1.0.2',
+    VERSION: '1.1.0',
 
     // Kaltura Avatar SDK credentials — main hero (Lily) and knowledge check (Morgan/Alex/Casey)
     MAIN_AVATAR: Object.freeze({
@@ -993,12 +993,12 @@ const READINESS_LABELS = Object.freeze({
  * @returns {string} CSS color value
  */
 function gradeColor(grade) {
-    if (!grade) return '#8ba3bb';
-    if (grade[0] === 'A') return '#22c55e';
-    if (grade[0] === 'B') return '#009fdb';
-    if (grade[0] === 'C') return '#f59e0b';
-    if (grade[0] === 'D') return '#f97316';
-    return '#ef4444';
+    if (!grade) return '#666666';
+    if (grade[0] === 'A') return '#6EBB1F';  // AT&T Green
+    if (grade[0] === 'B') return '#067AB4';  // AT&T Blue
+    if (grade[0] === 'C') return '#FF9900';  // AT&T Gold
+    if (grade[0] === 'D') return '#FF7200';  // AT&T Orange
+    return '#B30A3C';                        // AT&T Burgundy
 }
 
 /**
