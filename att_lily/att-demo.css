@@ -463,6 +463,12 @@ header p {
     background: #0C2577;
 }
 
+/* Hide Fiber and Contact Center cards for now (keep only Wireless) */
+.check-card[data-check-id^="fiber_"],
+.check-card[data-check-id^="cc_"] {
+    display: none;
+}
+
 .product-badge {
     display: inline-block;
     padding: 4px 10px;
