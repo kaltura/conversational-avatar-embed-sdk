@@ -1,6 +1,5 @@
 /*!
  * Kaltura Avatar SDK v1.0.0
- * https://github.com/anthropics/claude-code
  *
  * Embed Kaltura AI Avatar conversations in any website.
  * Zero dependencies. Works with any framework.
