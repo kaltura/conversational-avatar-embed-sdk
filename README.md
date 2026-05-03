@@ -73,6 +73,7 @@ sdk.downloadTranscript();      // Downloads as file
 
 ## Documentation
 
+- [AI Agent Guide](AGENTS.md) — Complete SDK reference + advanced patterns for AI coding agents
 - [TypeScript API Reference](sdk/kaltura-avatar-sdk.d.ts) — Complete type definitions
 - [Analysis Backend](examples/hr_avatar/lambda/README.md) — Shared Lambda (AWS Bedrock) for all demos
 - [Contributing](CONTRIBUTING.md) — How to add a new demo application
