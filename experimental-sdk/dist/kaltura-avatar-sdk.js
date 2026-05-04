@@ -792,13 +792,14 @@
       const offer = await this._pc.createOffer();
       await this._pc.setLocalDescription(offer);
 
-      const answer = await new Promise((resolve, reject) => {
+      const answerData = await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Timeout waiting for ASR WebRTC answer'));
         }, 30000);
 
         socket.once('asr-webrtc-answer', (data) => {
           clearTimeout(timeout);
+          this._log.debug('Raw asr-webrtc-answer keys:', data ? Object.keys(data) : 'null');
           resolve(data);
         });
 
@@ -811,7 +812,16 @@
         this._log.debug('Sent asr-webrtc-offer');
       });
 
-      await this._pc.setRemoteDescription({ type: 'answer', sdp: answer.sdp });
+      // Server may send answer in various formats
+      const answerSdp = answerData?.sdp || answerData?.answer?.sdp || answerData?.answer || answerData;
+      this._log.debug('ASR answer received, type:', typeof answerSdp);
+      if (typeof answerSdp === 'string') {
+        await this._pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+      } else if (answerSdp?.type && answerSdp?.sdp) {
+        await this._pc.setRemoteDescription(answerSdp);
+      } else {
+        throw new Error('Unexpected ASR answer format: ' + JSON.stringify(answerData).substring(0, 200));
+      }
       this._log.info('ASR WebRTC connection established — mic audio flowing to server');
     }
 
