@@ -190,17 +190,18 @@ function logEvent(name, data) {
 // USER ACTIONS
 // ============================================================================
 
-// Send prompt
+// Inject DPP context
 ui.sendBtn.onclick = () => {
     const text = ui.promptInput.value.trim();
     if (text) {
         sdk.injectPrompt(text);
         ui.promptInput.value = '';
+        addSystemMessage(`DPP injected: ${truncate(text, 80)}`);
         logEvent('injectPrompt', truncate(text, 50));
     }
 };
 
-// Enter key sends
+// Enter key injects
 ui.promptInput.onkeypress = (e) => {
     if (e.key === 'Enter') ui.sendBtn.click();
 };
