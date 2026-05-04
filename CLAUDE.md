@@ -4,7 +4,7 @@
 
 ## Project Context
 
-This is a JavaScript SDK for embedding Kaltura AI Avatars into web applications. The SDK is a single UMD file (`sdk/kaltura-avatar-sdk.js`, ~4KB) with TypeScript declarations (`sdk/kaltura-avatar-sdk.d.ts`).
+This is a JavaScript SDK for embedding Kaltura AI Avatars into web applications. The SDK is a single UMD file (`sdk/kaltura-avatar-sdk.min.js`, ~6KB) with TypeScript declarations (`sdk/kaltura-avatar-sdk.d.ts`).
 
 ## Key Patterns
 
@@ -23,7 +23,7 @@ If a user says "Build me X using this SDK" or provides a client ID / flow ID:
 
 ## File Locations
 
-- SDK source: `sdk/kaltura-avatar-sdk.js`
+- SDK source: `sdk/kaltura-avatar-sdk.min.js` (production) / `sdk/kaltura-avatar-sdk.js` (dev)
 - Types: `sdk/kaltura-avatar-sdk.d.ts`
 - Working demos: `examples/` (att_lily, hr_avatar, code_interview, basic_demo)
 - Landing page: `index.html`

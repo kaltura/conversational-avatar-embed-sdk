@@ -218,10 +218,6 @@ sdk.on(KalturaAvatarSDK.Events.AGENT_TALKED, (data) => {
   if (text.includes('switching to the next challenge now')) {
     loadNextProblem();
   }
-
-  if (text.includes('show the product image')) {
-    displayProductImage();
-  }
 });
 ```
 
