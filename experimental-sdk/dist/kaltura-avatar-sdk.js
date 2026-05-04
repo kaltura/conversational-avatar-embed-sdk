@@ -697,6 +697,7 @@
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ASR CONNECTION (WebRTC peer connection for mic audio → server speech recognition)
+  // Protocol: asr-webrtc-init → asr-webrtc-ready → offer/answer exchange
   // ═══════════════════════════════════════════════════════════════════════════
 
   class ASRConnection {
@@ -704,6 +705,7 @@
       this._config = config;
       this._log = logger;
       this._pc = null;
+      this._socket = null;
     }
 
     get peerConnection() { return this._pc; }
@@ -722,9 +724,41 @@
       }];
     }
 
-    create(socket, micStream) {
-      this._log.info('Creating ASR peer connection for mic audio');
+    async start(socket, sessionId, micStream) {
+      this._socket = socket;
+      this._log.info('Initiating ASR WebRTC connection');
 
+      try {
+        await this._waitForReady(socket, sessionId);
+        await this._negotiate(socket, micStream);
+      } catch (err) {
+        this._log.warn('ASR connection failed, mic will not work:', err.message);
+      }
+    }
+
+    _waitForReady(socket, sessionId) {
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Timeout waiting for ASR WebRTC ready'));
+        }, 30000);
+
+        socket.once('asr-webrtc-ready', () => {
+          clearTimeout(timeout);
+          this._log.debug('Server ASR WebRTC ready');
+          resolve();
+        });
+
+        socket.once('asr-webrtc-error', (data) => {
+          clearTimeout(timeout);
+          reject(new Error(data?.error || 'ASR WebRTC init error'));
+        });
+
+        socket.emit('asr-webrtc-init', { sessionId });
+        this._log.debug('Sent asr-webrtc-init', sessionId);
+      });
+    }
+
+    async _negotiate(socket, micStream) {
       this._pc = new RTCPeerConnection({
         iceServers: this._buildIceServers(),
         bundlePolicy: 'max-bundle',
@@ -735,37 +769,58 @@
         const audioTrack = micStream.getAudioTracks()[0];
         if (audioTrack) {
           this._pc.addTrack(audioTrack, micStream);
-          this._log.debug('Mic track added to ASR connection');
+          this._log.debug('Mic track added to ASR peer connection');
         }
       }
 
       this._pc.onicecandidate = (e) => {
-        if (e.candidate) socket.emit('webrtc-ice-candidate', { candidate: e.candidate });
+        if (e.candidate) {
+          socket.emit('asr-webrtc-ice-candidate', { candidate: e.candidate });
+        }
       };
 
       this._pc.onconnectionstatechange = () => {
         this._log.debug('ASR connection state:', this._pc.connectionState);
       };
 
-      socket.emit('webrtc-create-offer');
-    }
+      socket.on('asr-ice-candidate', async (data) => {
+        if (this._pc && data?.candidate) {
+          try { await this._pc.addIceCandidate(data.candidate); } catch (e) { /* ignore */ }
+        }
+      });
 
-    async handleOffer(data) {
-      if (!this._pc) return null;
-      await this._pc.setRemoteDescription(data.offer);
-      const answer = await this._pc.createAnswer();
-      await this._pc.setLocalDescription(answer);
-      return this._pc.localDescription;
-    }
+      const offer = await this._pc.createOffer();
+      await this._pc.setLocalDescription(offer);
 
-    async addIceCandidate(candidate) {
-      if (this._pc && candidate) {
-        try { await this._pc.addIceCandidate(candidate); } catch (e) { /* ignore */ }
-      }
+      const answer = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Timeout waiting for ASR WebRTC answer'));
+        }, 30000);
+
+        socket.once('asr-webrtc-answer', (data) => {
+          clearTimeout(timeout);
+          resolve(data);
+        });
+
+        socket.once('asr-webrtc-error', (data) => {
+          clearTimeout(timeout);
+          reject(new Error(data?.error || 'ASR WebRTC offer error'));
+        });
+
+        socket.emit('asr-webrtc-offer', { sdp: offer.sdp });
+        this._log.debug('Sent asr-webrtc-offer');
+      });
+
+      await this._pc.setRemoteDescription({ type: 'answer', sdp: answer.sdp });
+      this._log.info('ASR WebRTC connection established — mic audio flowing to server');
     }
 
     close() {
       if (this._pc) { this._pc.close(); this._pc = null; }
+      if (this._socket) {
+        this._socket.off('asr-ice-candidate');
+        this._socket = null;
+      }
     }
   }
 
@@ -1218,23 +1273,15 @@
           if (!resolved) { resolved = true; reject(err); }
         });
 
-        // WebRTC signaling (ASR mic connection + audio fallback)
+        // WebRTC signaling (audio fallback only — ASR uses asr-* events internally)
         this._socket.on('webrtc-offer', async (data) => {
-          this._log.debug('Received webrtc-offer');
-          // Route to ASR connection (video mode) or audio fallback
-          const handler = this._asr.peerConnection || this._audioFallback.peerConnection;
-          if (this._asr.peerConnection) {
-            const answer = await this._asr.handleOffer(data);
-            if (answer) this._socket.emit('webrtc-answer', { answer });
-          } else {
-            const answer = await this._audioFallback.handleOffer(data);
-            if (answer) this._socket.emit('webrtc-answer', { answer });
-          }
+          this._log.debug('Received webrtc-offer (audio fallback)');
+          const answer = await this._audioFallback.handleOffer(data);
+          if (answer) this._socket.emit('webrtc-answer', { answer });
         });
 
         this._socket.on('webrtc-ice-candidate', async (data) => {
           if (data?.candidate) {
-            await this._asr.addIceCandidate(data.candidate);
             await this._audioFallback.addIceCandidate(data.candidate);
           }
         });
@@ -1302,8 +1349,6 @@
         await this._mic.acquire(constraints || { audio: { echoCancellation: true }, video: false });
         this._micReady = true;
         this._emitter.emit(Events.MIC_GRANTED, { stream: this._mic.stream });
-        // Create ASR connection to send mic audio to server for speech recognition
-        this._asr.create(this._socket, this._mic.stream);
         this._checkApprovePermissions();
       } catch (err) {
         this._log.warn('Mic permission denied, continuing in text-only mode', err.message);
@@ -1322,6 +1367,10 @@
         this._state.transition(State.IN_CONVERSATION);
         this._emitter.emit(Events.READY);
         this._reconnect.reset();
+        // Start ASR WebRTC after permissions approved (server needs this sequence)
+        if (this._mic.stream && this._sessionId) {
+          this._asr.start(this._socket, this._sessionId, this._mic.stream);
+        }
       }
     }
 
