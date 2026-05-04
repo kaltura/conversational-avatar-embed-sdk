@@ -8,15 +8,15 @@ This document enables AI coding agents to build applications using the Kaltura A
 
 **Kaltura Avatar SDK** embeds an AI-powered video avatar in any website via iframe + postMessage.
 
-- Zero dependencies, ~4KB minified (UMD)
-- Load via `<script src="sdk/kaltura-avatar-sdk.js"></script>` (exposes global `KalturaAvatarSDK`)
-- Or use from CDN / npm
+- Zero dependencies, ~6KB minified (UMD)
+- Load via CDN: `<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk/kaltura-avatar-sdk.min.js"></script>`
+- Exposes global `KalturaAvatarSDK`
 
 ### Minimal Working Example
 
 ```html
 <div id="avatar" style="width:800px;height:600px;"></div>
-<script src="https://kaltura.github.io/conversational-avatar-embed-sdk/sdk/kaltura-avatar-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk/kaltura-avatar-sdk.min.js"></script>
 <script>
 const sdk = new KalturaAvatarSDK({
   clientId: 'YOUR_CLIENT_ID',
@@ -378,7 +378,7 @@ Here's a full working implementation for a fictional company "Acme Cloud" that o
   <div id="status">Connecting...</div>
   <div id="transcript"></div>
 
-  <script src="https://kaltura.github.io/conversational-avatar-embed-sdk/sdk/kaltura-avatar-sdk.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk/kaltura-avatar-sdk.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

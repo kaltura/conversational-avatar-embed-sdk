@@ -2,13 +2,13 @@
 
 Embed AI avatar conversations in any website with just a few lines of code.
 
-**Zero dependencies** · **~4KB minified** · **Works everywhere**
+**Zero dependencies** · **~6KB minified** · **Works everywhere**
 
 ## Quick Start
 
 ```html
 <div id="avatar" style="width: 800px; height: 600px;"></div>
-<script src="sdk/kaltura-avatar-sdk.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk/kaltura-avatar-sdk.min.js"></script>
 <script>
   const sdk = new KalturaAvatarSDK({
     clientId: 'YOUR_CLIENT_ID',
