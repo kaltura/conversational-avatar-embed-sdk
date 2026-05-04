@@ -184,24 +184,33 @@ test.describe('KalturaAvatarSDK — Live Integration', () => {
         });
 
         let gotGreeting = false;
+        let hasUserEntry = false;
+        let hasSecondAvatar = false;
+
+        function checkDone() {
+          if (hasUserEntry && hasSecondAvatar) {
+            clearTimeout(timeout);
+            const transcript = sdk.getTranscript();
+            const transcriptText = sdk.getTranscriptText({ format: 'text' });
+            sdk.destroy();
+            resolve({
+              entryCount: transcript.length,
+              hasAvatarEntry: transcript.some(e => e.role === 'Avatar'),
+              hasUserEntry: transcript.some(e => e.role === 'User'),
+              textFormat: transcriptText.substring(0, 200)
+            });
+          }
+        }
+
+        sdk.on('transcript-entry', (entry) => {
+          if (entry.role === 'User') { hasUserEntry = true; checkDone(); }
+        });
 
         sdk.on('avatar-speech', ({ text }) => {
           if (!gotGreeting) {
             gotGreeting = true;
             sdk.sendText('Hello avatar!');
-            // Wait for response
-            sdk.once('avatar-speech', ({ text: resp }) => {
-              clearTimeout(timeout);
-              const transcript = sdk.getTranscript();
-              const transcriptText = sdk.getTranscriptText({ format: 'text' });
-              sdk.destroy();
-              resolve({
-                entryCount: transcript.length,
-                hasAvatarEntry: transcript.some(e => e.role === 'Avatar'),
-                hasUserEntry: transcript.some(e => e.role === 'User'),
-                textFormat: transcriptText.substring(0, 200)
-              });
-            });
+            sdk.once('avatar-speech', () => { hasSecondAvatar = true; checkDone(); });
           }
         });
 
