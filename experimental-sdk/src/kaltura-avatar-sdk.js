@@ -808,12 +808,12 @@
           reject(new Error(data?.error || 'ASR WebRTC offer error'));
         });
 
-        socket.emit('asr-webrtc-offer', { sdp: offer.sdp });
+        socket.emit('asr-webrtc-offer', { offer: offer.sdp, is_reconnect: false });
         this._log.debug('Sent asr-webrtc-offer');
       });
 
-      // Server may send answer in various formats
-      const answerSdp = answerData?.sdp || answerData?.answer?.sdp || answerData?.answer || answerData;
+      // Server sends { answer: sdpString }
+      const answerSdp = answerData?.answer || answerData?.sdp || answerData;
       this._log.debug('ASR answer received, type:', typeof answerSdp);
       if (typeof answerSdp === 'string') {
         await this._pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
