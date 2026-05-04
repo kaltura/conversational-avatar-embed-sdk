@@ -198,23 +198,6 @@ function updateAvatarContext(newData) {
 }
 ```
 
-### Multi-Persona via DPP
-
-A single avatar Knowledge Base can support multiple personas. The `inst[0]` field selects which persona to activate:
-
-```javascript
-// In Knowledge Base prompt (Kaltura Studio):
-// "Read inst[0] to determine your persona:
-//   'SALES COACH' → You are Jordan, a friendly sales coach
-//   'PRODUCT QUIZ' → You are Morgan, a product knowledge tester"
-
-// At runtime, select persona via DPP:
-sdk.injectPrompt(JSON.stringify({
-  inst: ["SALES COACH"],
-  user: { first_name: "Alex" }
-}));
-```
-
 ---
 
 ## Pattern 2: Avatar Spoken Commands (Triggering JS Functions)
@@ -264,43 +247,11 @@ The avatar will speak these exact phrases, and your JS code detects them to trig
 |-------------|-----------|
 | "Ending call now." | `sdk.end()` + show results |
 | "Switching to the next challenge now." | Load next scenario/problem |
-| "Let me show you that on screen." | Display visual content |
 | "I'll send you a summary." | Trigger email/export |
 
 ---
 
-## Pattern 3: Visual Effects via Knowledge Base
-
-In Kaltura Studio's Knowledge Base, you can instruct the avatar to trigger visual effects using specific phrases. The avatar platform natively handles these:
-
-### Show an Image on Screen
-
-In Knowledge Base:
-```
-When discussing the product features, show them the following image on screen:
-https://example.com/images/product-diagram.png
-```
-
-The avatar platform will display the image as an overlay when the avatar says it.
-
-### Show a Popup Link
-
-In Knowledge Base:
-```
-After explaining the pricing, give them this link in a pop up window:
-https://example.com/pricing-details
-```
-
-### Collect Email Address
-
-In Knowledge Base:
-```
-Before ending the call, ask for their E-Mail address.
-```
-
-The platform shows an email input field. The collected email is available via the conversation metadata.
-
-### Pronunciation / Lexeme Instructions
+## Pattern 3: Pronunciation / Lexeme Instructions
 
 For brand names, acronyms, or technical terms that need specific pronunciation:
 
@@ -370,11 +321,6 @@ When the user gives a vague answer, probe once:
 
 # PRONUNCIATION
 <lexeme><grapheme>YOUR_BRAND</grapheme><alias>your brand pronunciation</alias></lexeme>
-
-# VISUAL EFFECTS
-- When discussing [topic], show them the following image on screen: [URL]
-- After explaining [topic], give them this link in a pop up window: [URL]
-- Before ending the call, ask for their E-Mail address.
 
 # GUARDRAILS
 SAFETY: If the user expresses genuine distress or self-harm — break character calmly:
@@ -597,15 +543,6 @@ You: "Nice work! You're ahead of the game. Let's skip to the next one then. Movi
 # PRONUNCIATION
 <lexeme><grapheme>Acme</grapheme><alias>Acmee</alias></lexeme>
 <lexeme><grapheme>DevOps</grapheme><alias>Dev Ops</alias></lexeme>
-
-# VISUAL EFFECTS
-When discussing workspace setup, show them the following image on screen:
-https://example.com/images/workspace-setup-diagram.png
-
-After explaining integrations, give them this link in a pop up window:
-https://docs.acmecloud.example.com/integrations
-
-Before ending the call, ask for their E-Mail address.
 
 # GUARDRAILS
 SAFETY: If the user expresses frustration or wants to cancel, respond empathetically:

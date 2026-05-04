@@ -106,8 +106,6 @@ The agent will generate:
 | Full SDK API (constructor, events, lifecycle, transcript) | Yes |
 | Dynamic Prompt Injection (real-time context updates) | Yes |
 | Avatar Spoken Commands (trigger JS from speech) | Yes |
-| Multi-persona switching via DPP | Yes |
-| Visual effects (images, popup links, email collection) | Yes |
 | Pronunciation / lexeme instructions | Yes |
 | RICECO framework for writing Knowledge Base prompts | Yes |
 | Complete working example with fictional company | Yes |
