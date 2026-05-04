@@ -46,7 +46,8 @@ Embed AI avatar conversations in any website with just a few lines of code.
 │   ├── att_lily/         ← AT&T Seller Hub (sales training)
 │   ├── hr_avatar/        ← HR Avatar (interview simulations)
 │   ├── code_interview/   ← Code Interview (pair programming)
-│   └── basic_demo/       ← Minimal starter example
+│   ├── basic_demo/       ← Minimal starter example
+│   └── test_harness/     ← Manual testing tool (all SDK capabilities)
 └── index.html            ← Landing page (GitHub Pages)
 ```
 
@@ -58,6 +59,7 @@ Embed AI avatar conversations in any website with just a few lines of code.
 | **HR Avatar** | Interview simulations, CV upload, AI call analysis | [Launch](examples/hr_avatar/) · [Docs](examples/hr_avatar/README.md) |
 | **Code Interview** | AI pair programming with Monaco editor and real-time code context | [Launch](examples/code_interview/) · [Docs](examples/code_interview/README.md) |
 | **Basic Demo** | Minimal example showing all SDK features | [Launch](examples/basic_demo/) · [Source](examples/basic_demo/demo.js) |
+| **Test Harness** | Manual testing tool for all SDK capabilities | [Launch](examples/test_harness/) · [Source](examples/test_harness/index.html) |
 
 All demos run via any static server: `python3 -m http.server 8080`
 

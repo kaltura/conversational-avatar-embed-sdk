@@ -34,6 +34,30 @@ jobs:
       - name: Run Code Interview E2E tests
         run: npm run test:code
 
+  test-experimental-sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: experimental-sdk
+        run: npm install
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run unit tests
+        working-directory: experimental-sdk
+        run: npm test
+
+      - name: Run live integration tests
+        working-directory: experimental-sdk
+        run: npm run test:live
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -43,13 +67,23 @@ jobs:
         with:
           node-version: 20
 
-      - name: Check SDK file sizes
+      - name: Check SDK file sizes (iframe SDK)
         run: |
           MAX_SIZE=8192
           SIZE=$(wc -c < sdk/kaltura-avatar-sdk.min.js)
           echo "SDK minified size: ${SIZE} bytes"
           if [ "$SIZE" -gt "$MAX_SIZE" ]; then
             echo "::error::SDK minified size ($SIZE bytes) exceeds limit ($MAX_SIZE bytes)"
+            exit 1
+          fi
+
+      - name: Check experimental SDK file size
+        run: |
+          MAX_SIZE=65536
+          SIZE=$(wc -c < experimental-sdk/dist/kaltura-avatar-sdk.js)
+          echo "Experimental SDK size: ${SIZE} bytes"
+          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+            echo "::error::Experimental SDK size ($SIZE bytes) exceeds limit ($MAX_SIZE bytes)"
             exit 1
           fi
 
@@ -60,7 +94,7 @@ jobs:
             node -e "JSON.parse(require('fs').readFileSync('$f', 'utf8'))" || exit 1
           done
 
-      - name: Check for console.log in SDK
+      - name: Check for console.log in production SDK
         run: |
           if grep -n "console.log" sdk/kaltura-avatar-sdk.js | grep -v "console.error"; then
             echo "::warning::Found console.log in SDK source (only console.error is allowed)"
