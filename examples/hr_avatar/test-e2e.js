@@ -7,7 +7,7 @@
 
 const { chromium } = require('playwright');
 
-const BASE_URL = process.env.BASE_URL || 'https://zoharbabin.github.io/kaltura-avatar-sdk/examples/hr_avatar/';
+const BASE_URL = process.env.BASE_URL || 'https://kaltura.github.io/conversational-avatar-embed-sdk/examples/hr_avatar/';
 
 async function runTests() {
     console.log('🧪 Starting HR Avatar E2E Tests\n');

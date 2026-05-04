@@ -6,7 +6,7 @@
 
 const { chromium } = require('playwright');
 
-const BASE_URL = process.env.BASE_URL || 'https://zoharbabin.github.io/kaltura-avatar-sdk/examples/code_interview/';
+const BASE_URL = process.env.BASE_URL || 'https://kaltura.github.io/conversational-avatar-embed-sdk/examples/code_interview/';
 
 async function runTests() {
     console.log('🧪 Starting Code Interview E2E Tests\n');

@@ -16,7 +16,7 @@ This document enables AI coding agents to build applications using the Kaltura A
 
 ```html
 <div id="avatar" style="width:800px;height:600px;"></div>
-<script src="https://zoharbabin.github.io/kaltura-avatar-sdk/sdk/kaltura-avatar-sdk.js"></script>
+<script src="https://kaltura.github.io/conversational-avatar-embed-sdk/sdk/kaltura-avatar-sdk.js"></script>
 <script>
 const sdk = new KalturaAvatarSDK({
   clientId: 'YOUR_CLIENT_ID',
@@ -432,7 +432,7 @@ Here's a full working implementation for a fictional company "Acme Cloud" that o
   <div id="status">Connecting...</div>
   <div id="transcript"></div>
 
-  <script src="https://zoharbabin.github.io/kaltura-avatar-sdk/sdk/kaltura-avatar-sdk.js"></script>
+  <script src="https://kaltura.github.io/conversational-avatar-embed-sdk/sdk/kaltura-avatar-sdk.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
