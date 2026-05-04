@@ -232,8 +232,8 @@ function doSendText() {
     const text = input.value.trim();
     if (!text || !sdk) return;
     sdk.sendText(text);
-    addBubble('user', text);
     input.value = '';
+    // Bubble is added by the USER_SPEECH event handler when server echoes back
 }
 
 function doInjectDPP() {

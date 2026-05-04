@@ -696,7 +696,81 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // AUDIO FALLBACK (WebRTC via socket signaling)
+  // ASR CONNECTION (WebRTC peer connection for mic audio → server speech recognition)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  class ASRConnection {
+    constructor(config, logger) {
+      this._config = config;
+      this._log = logger;
+      this._pc = null;
+    }
+
+    get peerConnection() { return this._pc; }
+
+    _buildIceServers() {
+      const turn = this._config.turn?.urls || [
+        `turn:${DEFAULTS.TURN_HOST}:80?transport=udp`,
+        `turn:${DEFAULTS.TURN_HOST}:443?transport=udp`,
+        `turn:${DEFAULTS.TURN_HOST}:80?transport=tcp`,
+        `turns:${DEFAULTS.TURNS_HOST}:443?transport=tcp`
+      ];
+      return [{
+        urls: turn,
+        username: this._config.turn?.username || DEFAULTS.TURN_USERNAME,
+        credential: this._config.turn?.credential || DEFAULTS.TURN_CREDENTIAL
+      }];
+    }
+
+    create(socket, micStream) {
+      this._log.info('Creating ASR peer connection for mic audio');
+
+      this._pc = new RTCPeerConnection({
+        iceServers: this._buildIceServers(),
+        bundlePolicy: 'max-bundle',
+        iceTransportPolicy: this._config.turn?.iceTransportPolicy || 'relay'
+      });
+
+      if (micStream) {
+        const audioTrack = micStream.getAudioTracks()[0];
+        if (audioTrack) {
+          this._pc.addTrack(audioTrack, micStream);
+          this._log.debug('Mic track added to ASR connection');
+        }
+      }
+
+      this._pc.onicecandidate = (e) => {
+        if (e.candidate) socket.emit('webrtc-ice-candidate', { candidate: e.candidate });
+      };
+
+      this._pc.onconnectionstatechange = () => {
+        this._log.debug('ASR connection state:', this._pc.connectionState);
+      };
+
+      socket.emit('webrtc-create-offer');
+    }
+
+    async handleOffer(data) {
+      if (!this._pc) return null;
+      await this._pc.setRemoteDescription(data.offer);
+      const answer = await this._pc.createAnswer();
+      await this._pc.setLocalDescription(answer);
+      return this._pc.localDescription;
+    }
+
+    async addIceCandidate(candidate) {
+      if (this._pc && candidate) {
+        try { await this._pc.addIceCandidate(candidate); } catch (e) { /* ignore */ }
+      }
+    }
+
+    close() {
+      if (this._pc) { this._pc.close(); this._pc = null; }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AUDIO FALLBACK (WebRTC via socket signaling — used when WHEP video fails)
   // ═══════════════════════════════════════════════════════════════════════════
 
   class AudioFallback {
@@ -743,6 +817,11 @@
         };
       });
 
+      if (options.micStream) {
+        const audioTrack = options.micStream.getAudioTracks()[0];
+        if (audioTrack) this._pc.addTrack(audioTrack, options.micStream);
+      }
+
       this._pc.onicecandidate = (e) => {
         if (e.candidate) socket.emit('webrtc-ice-candidate', { candidate: e.candidate });
       };
@@ -752,11 +831,17 @@
     }
 
     async handleOffer(data) {
-      if (!this._pc) return;
+      if (!this._pc) return null;
       await this._pc.setRemoteDescription(data.offer);
       const answer = await this._pc.createAnswer();
       await this._pc.setLocalDescription(answer);
       return this._pc.localDescription;
+    }
+
+    async addIceCandidate(candidate) {
+      if (this._pc && candidate) {
+        try { await this._pc.addIceCandidate(candidate); } catch (e) { /* ignore */ }
+      }
     }
 
     close() {
@@ -819,6 +904,7 @@
       this._dpp = new DPPManager(this._log);
       this._mic = new MicrophoneManager(this._log);
       this._whep = new WHEPClient(this._config, this._log);
+      this._asr = new ASRConnection(this._config, this._log);
       this._audioFallback = new AudioFallback(this._config, this._log);
 
       this._socket = null;
@@ -906,8 +992,8 @@
       this._state.assertState(State.IN_CONVERSATION);
       if (!text || typeof text !== 'string') return;
       this._socket.emit('debug_text_entered', { isFinal: true, text });
-      this._transcript.add('User', text);
       this._log.debug('Text sent', text);
+      // Transcript entry is added when server echoes back via debug_vad_speech_detected
     }
 
     injectDPP(data) {
@@ -1132,16 +1218,24 @@
           if (!resolved) { resolved = true; reject(err); }
         });
 
-        // WebRTC signaling (audio fallback)
+        // WebRTC signaling (ASR mic connection + audio fallback)
         this._socket.on('webrtc-offer', async (data) => {
-          const answer = await this._audioFallback.handleOffer(data);
-          if (answer) this._socket.emit('webrtc-answer', { answer });
+          this._log.debug('Received webrtc-offer');
+          // Route to ASR connection (video mode) or audio fallback
+          const handler = this._asr.peerConnection || this._audioFallback.peerConnection;
+          if (this._asr.peerConnection) {
+            const answer = await this._asr.handleOffer(data);
+            if (answer) this._socket.emit('webrtc-answer', { answer });
+          } else {
+            const answer = await this._audioFallback.handleOffer(data);
+            if (answer) this._socket.emit('webrtc-answer', { answer });
+          }
         });
 
         this._socket.on('webrtc-ice-candidate', async (data) => {
-          const pc = this._audioFallback.peerConnection;
-          if (pc && data?.candidate) {
-            try { await pc.addIceCandidate(data.candidate); } catch (e) { /* ignore */ }
+          if (data?.candidate) {
+            await this._asr.addIceCandidate(data.candidate);
+            await this._audioFallback.addIceCandidate(data.candidate);
           }
         });
 
@@ -1208,6 +1302,8 @@
         await this._mic.acquire(constraints || { audio: { echoCancellation: true }, video: false });
         this._micReady = true;
         this._emitter.emit(Events.MIC_GRANTED, { stream: this._mic.stream });
+        // Create ASR connection to send mic audio to server for speech recognition
+        this._asr.create(this._socket, this._mic.stream);
         this._checkApprovePermissions();
       } catch (err) {
         this._log.warn('Mic permission denied, continuing in text-only mode', err.message);
@@ -1328,6 +1424,7 @@
 
     _cleanupMedia() {
       this._whep.close();
+      this._asr.close();
       this._audioFallback.close();
       this._mic.release();
       if (this._videoElement) this._videoElement.srcObject = null;
@@ -1337,7 +1434,7 @@
 
   // Expose internals for advanced use and testing
   KalturaAvatarSDK.AvatarError = AvatarError;
-  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, DPPManager, WHEPClient, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger };
+  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger };
 
   return KalturaAvatarSDK;
 }));
