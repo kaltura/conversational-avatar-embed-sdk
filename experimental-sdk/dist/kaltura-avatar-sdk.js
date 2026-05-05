@@ -1779,6 +1779,7 @@
     disconnect() {
       if (this._state.is(State.DESTROYED, State.UNINITIALIZED)) return;
       this._intentionalDisconnect = true;
+      this._cleanupMedia();
       this._cleanupConnection();
       this._state.transition(State.ENDED);
       this._emitter.emit(Events.DISCONNECTED, { reason: 'user' });
