@@ -1,5 +1,5 @@
 /**
- * Kaltura Avatar SDK v2 (Experimental)
+ * Kaltura Avatar SDK (Socket)
  * Direct Socket.IO + WebRTC — No iframe required
  */
 
