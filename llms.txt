@@ -1,0 +1,48 @@
+# Kaltura Avatar SDK
+
+> JavaScript SDK for embedding AI-powered video avatar conversations in any website. Real-time WebRTC video, speech recognition, dynamic prompt injection, and rich visual content (GenUI). Two integration modes: Socket (full control) and Iframe (drop-in simple). MIT licensed.
+
+## Documentation
+
+- [Socket SDK Guide](https://kaltura.github.io/conversational-avatar-embed-sdk/sdk-socket/README.md): Direct Socket.IO + WebRTC connection — configuration, events, methods, GenUI rendering, error codes
+- [Iframe SDK / AI Agent Guide](https://kaltura.github.io/conversational-avatar-embed-sdk/AGENTS.md): Complete iframe API, DPP injection, spoken commands, RICECO prompt framework
+- [TypeScript API (Socket)](https://kaltura.github.io/conversational-avatar-embed-sdk/sdk-socket/dist/kaltura-avatar-sdk.d.ts): Full type definitions for the Socket SDK
+- [TypeScript API (Iframe)](https://kaltura.github.io/conversational-avatar-embed-sdk/sdk-iframe/kaltura-avatar-sdk.d.ts): Type definitions for the Iframe SDK
+- [Contributing](https://kaltura.github.io/conversational-avatar-embed-sdk/CONTRIBUTING.md): Repository layout, build instructions, how to add demos
+
+## Quick Start
+
+### Socket SDK (full control over video, audio, events, GenUI)
+
+```html
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-socket/dist/kaltura-avatar-sdk.js"></script>
+<script>
+const sdk = new KalturaAvatarSDK({ clientId: 'YOUR_ID', flowId: 'YOUR_FLOW', container: '#avatar' });
+sdk.on('avatar-speech', ({ text }) => console.log(text));
+sdk.connect();
+</script>
+```
+
+### Iframe SDK (zero deps, sandboxed, ~6KB)
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-iframe/kaltura-avatar-sdk.min.js"></script>
+<script>
+const sdk = new KalturaAvatarSDK({ clientId: 'YOUR_ID', flowId: 'YOUR_FLOW', container: '#avatar' });
+sdk.on('showing-agent', () => setTimeout(() => sdk.injectPrompt(JSON.stringify({greeting:"Hi"})), 500));
+await sdk.start();
+</script>
+```
+
+## Key Concepts
+
+- **Dynamic Prompt Injection (DPP)**: Inject JSON context at runtime to control avatar behavior, personality, and knowledge
+- **Avatar Spoken Commands**: Trigger JavaScript functions when the avatar speaks specific phrases
+- **GenUI Rendering** (Socket only): Built-in renderers for charts, tables, code editors, diagrams, videos, images
+- **Transcripts**: Built-in recording with export to text, markdown, or JSON
+- **Auto-reconnect** (Socket only): Exponential backoff handles network drops gracefully
+
+## Optional
+
+- [Full documentation](https://kaltura.github.io/conversational-avatar-embed-sdk/llms-full.txt): Complete SDK documentation in a single file

@@ -1,7 +1,7 @@
 {
   "name": "conversational-avatar-embed-sdk",
   "version": "2.0.0",
-  "description": "Kaltura Avatar SDK — Embed AI avatar conversations in any website (Socket + Iframe)",
+  "description": "Kaltura Avatar SDK — Embed AI-powered video avatar conversations in any website. Real-time WebRTC, speech recognition, GenUI rendering. Socket + Iframe modes.",
   "main": "sdk-iframe/kaltura-avatar-sdk.js",
   "scripts": {
     "test": "npm run test:iframe && npm run test:socket",
@@ -15,10 +15,12 @@
     "type": "git",
     "url": "git+https://github.com/kaltura/conversational-avatar-embed-sdk.git"
   },
+  "homepage": "https://kaltura.github.io/conversational-avatar-embed-sdk/",
   "keywords": [
     "kaltura",
     "avatar",
     "ai",
+    "ai-avatar",
     "sdk",
     "conversational-ai",
     "webrtc",
@@ -26,16 +28,24 @@
     "video-chat",
     "real-time",
     "genui",
-    "interactive",
+    "generative-ui",
+    "text-to-speech",
+    "speech-recognition",
+    "voice-ai",
     "iframe",
-    "socket.io"
+    "socket.io",
+    "video-avatar",
+    "chat-sdk",
+    "dynamic-prompt"
   ],
-  "author": "Kaltura",
+  "author": {
+    "name": "Kaltura",
+    "url": "https://kaltura.com"
+  },
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/kaltura/conversational-avatar-embed-sdk/issues"
   },
-  "homepage": "https://github.com/kaltura/conversational-avatar-embed-sdk#readme",
   "devDependencies": {
     "playwright": "^1.58.2"
   }

@@ -1,0 +1,66 @@
+This repository contains the Kaltura Avatar SDK for embedding AI-powered video avatar conversations in websites.
+
+## Two SDKs (not versions — different integration approaches)
+
+### Socket SDK (`sdk-socket/`) — Full control
+- Direct Socket.IO + WebRTC connection
+- You own the <video> element
+- Built-in GenUI rendering (charts, tables, code, diagrams)
+- Real-time events, auto-reconnect, extensible plugins
+- Source: `sdk-socket/src/kaltura-avatar-sdk.js`
+- CDN: `https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-socket/dist/kaltura-avatar-sdk.js`
+- Peer dep: Socket.IO client v4
+
+### Iframe SDK (`sdk-iframe/`) — Drop-in simple
+- Sandboxed iframe + postMessage
+- Zero dependencies, ~6KB minified
+- Automatic UI handling
+- Source: `sdk-iframe/kaltura-avatar-sdk.min.js`
+- CDN: `https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-iframe/kaltura-avatar-sdk.min.js`
+
+## Key Patterns
+
+### Socket SDK
+```javascript
+const sdk = new KalturaAvatarSDK({ clientId: '...', flowId: '...', container: '#avatar' });
+sdk.on('avatar-speech', ({ text }) => console.log(text));
+sdk.on('user-speech', ({ text, isFinal }) => { if (isFinal) console.log(text); });
+sdk.on('genui', ({ type, data }) => { /* charts, tables, code, etc. */ });
+sdk.connect();
+
+// Send text instead of speaking
+sdk.sendText('Hello');
+
+// Inject runtime context
+sdk.injectDPP({ user: { name: 'Jane' }, inst: ['Be concise.'] });
+
+// Register spoken command triggers
+sdk.registerCommand('end', 'ending call now', () => sdk.disconnect());
+```
+
+### Iframe SDK
+```javascript
+const sdk = new KalturaAvatarSDK({ clientId: '...', flowId: '...', container: '#avatar' });
+
+sdk.on('showing-agent', () => {
+  setTimeout(() => sdk.injectPrompt(JSON.stringify({ greeting: "Hello!" })), 500);
+});
+
+sdk.on('agent-talked', (data) => {
+  const text = (data?.agentContent || data || '').toLowerCase();
+  if (text.includes('ending call now')) { sdk.end(); }
+});
+
+await sdk.start();
+```
+
+## When building apps with this SDK
+1. Default to Socket SDK unless user needs iframe isolation
+2. Always inject DPP on ready/showing-agent events
+3. Use spoken commands to trigger JS actions (avatar says trigger phrase → your code runs)
+4. Both SDKs connect to same Kaltura backend — same avatars, same Knowledge Base
+
+## Testing
+```bash
+cd sdk-socket && npm test  # 125 unit + GenUI tests
+```
