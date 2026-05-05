@@ -55,6 +55,7 @@
     MIC_DENIED: 'mic-denied',
 
     GENUI: 'genui',
+    CONTACT_COLLECTION: 'contact-collection',
     COMMAND_MATCHED: 'command-matched',
     TRANSCRIPT_ENTRY: 'transcript-entry',
 
@@ -726,7 +727,26 @@
 
     async start(socket, sessionId, micStream) {
       this._socket = socket;
+      this._pendingCandidates = [];
+      this._remoteDescSet = false;
       this._log.info('Initiating ASR WebRTC connection');
+
+      // Register ICE candidate handler FIRST, before any async work
+      socket.on('asr-ice-candidate', (data) => {
+        if (!data?.candidate) return;
+        const candidateInit = {
+          candidate: typeof data.candidate === 'string' ? data.candidate : data.candidate.candidate,
+          sdpMLineIndex: data.sdpMLineIndex != null ? data.sdpMLineIndex : 0
+        };
+        if (!this._remoteDescSet || !this._pc) {
+          this._pendingCandidates.push(candidateInit);
+          this._log.debug('Buffered remote ICE candidate');
+        } else {
+          this._pc.addIceCandidate(new RTCIceCandidate(candidateInit))
+            .then(() => this._log.debug('Added remote ICE candidate'))
+            .catch((e) => this._log.debug('ICE candidate error:', e.message));
+        }
+      });
 
       try {
         await this._waitForReady(socket, sessionId);
@@ -762,7 +782,8 @@
       this._pc = new RTCPeerConnection({
         iceServers: this._buildIceServers(),
         bundlePolicy: 'max-bundle',
-        iceTransportPolicy: this._config.turn?.iceTransportPolicy || 'relay'
+        rtcpMuxPolicy: 'require',
+        iceTransportPolicy: 'all'
       });
 
       if (micStream) {
@@ -773,24 +794,31 @@
         }
       }
 
+      // Trickle ICE: send candidates as they are gathered
       this._pc.onicecandidate = (e) => {
         if (e.candidate) {
           socket.emit('asr-webrtc-ice-candidate', { candidate: e.candidate });
+          this._log.debug('Sent ASR ICE candidate');
         }
       };
 
       this._pc.onconnectionstatechange = () => {
-        this._log.debug('ASR connection state:', this._pc.connectionState);
+        this._log.debug('ASR PC connectionState:', this._pc.connectionState);
       };
 
-      socket.on('asr-ice-candidate', async (data) => {
-        if (this._pc && data?.candidate) {
-          try { await this._pc.addIceCandidate(data.candidate); } catch (e) { /* ignore */ }
-        }
-      });
+      this._pc.oniceconnectionstatechange = () => {
+        this._log.debug('ASR PC iceConnectionState:', this._pc.iceConnectionState);
+      };
 
+      // Remote ICE candidates are buffered by start() handler on the instance
+
+      // Create and send offer
       const offer = await this._pc.createOffer();
       await this._pc.setLocalDescription(offer);
+      this._log.debug('Local description set, ICE gathering started');
+
+      // Send offer as full RTCSessionDescription (matches production app)
+      const offerDesc = { type: this._pc.localDescription.type, sdp: this._pc.localDescription.sdp };
 
       const answerData = await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -799,7 +827,6 @@
 
         socket.once('asr-webrtc-answer', (data) => {
           clearTimeout(timeout);
-          this._log.debug('Raw asr-webrtc-answer keys:', data ? Object.keys(data) : 'null');
           resolve(data);
         });
 
@@ -808,13 +835,12 @@
           reject(new Error(data?.error || 'ASR WebRTC offer error'));
         });
 
-        socket.emit('asr-webrtc-offer', { offer: offer.sdp, is_reconnect: false });
+        socket.emit('asr-webrtc-offer', { offer: offerDesc, is_reconnect: false });
         this._log.debug('Sent asr-webrtc-offer');
       });
 
-      // Server sends { answer: sdpString }
+      // Set remote description
       const answerSdp = answerData?.answer || answerData?.sdp || answerData;
-      this._log.debug('ASR answer received, type:', typeof answerSdp);
       if (typeof answerSdp === 'string') {
         await this._pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
       } else if (answerSdp?.type && answerSdp?.sdp) {
@@ -822,8 +848,22 @@
       } else {
         throw new Error('Unexpected ASR answer format: ' + JSON.stringify(answerData).substring(0, 200));
       }
-      this._log.info('ASR WebRTC connection established — mic audio flowing to server');
+      this._log.debug('Remote description set');
+
+      // Flush buffered ICE candidates
+      this._remoteDescSet = true;
+      for (const c of this._pendingCandidates) {
+        try {
+          await this._pc.addIceCandidate(new RTCIceCandidate(c));
+          this._log.debug('Flushed buffered ICE candidate');
+        } catch (e) {
+          this._log.debug('Failed to flush ICE candidate:', e.message);
+        }
+      }
+      this._pendingCandidates = [];
+      this._log.info('ASR WebRTC negotiation complete');
     }
+
 
     close() {
       if (this._pc) { this._pc.close(); this._pc = null; }
@@ -1056,9 +1096,43 @@
     sendText(text) {
       this._state.assertState(State.IN_CONVERSATION);
       if (!text || typeof text !== 'string') return;
-      this._socket.emit('debug_text_entered', { isFinal: true, text });
+      if (this._avatarSpeaking) {
+        this._socket.emit('tapToTalkStart', {});
+      }
+      this._socket.emit('debug_text_entered', {
+        isFinal: true, text,
+        room_id: this._roomId, session_id: this._sessionId
+      });
+      if (this._avatarSpeaking) {
+        this._socket.emit('tapToTalkEnd', {});
+      }
       this._log.debug('Text sent', text);
-      // Transcript entry is added when server echoes back via debug_vad_speech_detected
+    }
+
+    sendTextPartial(text) {
+      this._state.assertState(State.IN_CONVERSATION);
+      if (!text || typeof text !== 'string') return;
+      if (this._avatarSpeaking) {
+        this._socket.emit('tapToTalkStart', {});
+      }
+      this._socket.emit('debug_text_entered', {
+        isFinal: false, text,
+        room_id: this._roomId, session_id: this._sessionId
+      });
+    }
+
+    submitContact(type, value) {
+      this._state.assertState(State.IN_CONVERSATION);
+      this._socket.emit('contactInfoReceived', {
+        contact_info: { info_type: type, info_value: value }
+      });
+      this._log.debug('Contact submitted', type);
+    }
+
+    rejectContact(type) {
+      this._state.assertState(State.IN_CONVERSATION);
+      this._socket.emit('contactInfoRejected', { type: type || 'email' });
+      this._log.debug('Contact rejected', type);
     }
 
     injectDPP(data) {
@@ -1242,14 +1316,20 @@
           }
         });
 
-        // User speech (via server ASR)
+        // User speech (via server ASR) — interim/partial only
         this._socket.on('debug_vad_speech_detected', (data) => {
-          if (data?.transcript) {
-            this._emitter.emit(Events.USER_SPEECH, { text: data.transcript, isFinal: data.segmentType === 'final' });
+          if (data?.transcript && data.segmentType !== 'final') {
+            this._emitter.emit(Events.USER_SPEECH, { text: data.transcript, isFinal: false });
             this._emitter.emit(Events.USER_TRANSCRIPTION, { userTranscription: data.transcript });
-            if (data.segmentType === 'final') {
-              this._transcript.add('User', data.transcript);
-            }
+          }
+        });
+
+        // User speech confirmed (server acknowledged user's turn)
+        this._socket.on('agentTurnToTalk', (data) => {
+          if (data?.userTranscription) {
+            this._emitter.emit(Events.USER_SPEECH, { text: data.userTranscription, isFinal: true });
+            this._emitter.emit(Events.USER_TRANSCRIPTION, { userTranscription: data.userTranscription });
+            this._transcript.add('User', data.userTranscription);
           }
         });
 
@@ -1294,6 +1374,13 @@
           if (data?.candidate) {
             await this._audioFallback.addIceCandidate(data.candidate);
           }
+        });
+
+        // Contact collection (server pauses listening until responded)
+        this._socket.on('contactCollector', (data) => {
+          const type = data?.contact_type?.toLowerCase() || 'email';
+          this._log.debug('Contact collection requested', type);
+          this._emitter.emit(Events.CONTACT_COLLECTION, { type });
         });
 
         // GenUI events
@@ -1378,8 +1465,9 @@
         this._emitter.emit(Events.READY);
         this._reconnect.reset();
         // Start ASR WebRTC after permissions approved (server needs this sequence)
-        if (this._mic.stream && this._sessionId) {
-          this._asr.start(this._socket, this._sessionId, this._mic.stream);
+        // Server expects socket.id as the sessionId for ASR init (matches production app)
+        if (this._mic.stream && this._socket?.id) {
+          this._asr.start(this._socket, this._socket.id, this._mic.stream);
         }
       }
     }

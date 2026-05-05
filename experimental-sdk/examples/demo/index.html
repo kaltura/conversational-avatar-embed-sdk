@@ -11,7 +11,7 @@
     <script src="../../dist/kaltura-avatar-sdk.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d18; color: #e0e0e8; min-height: 100vh; display: flex; flex-direction: column; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d18; color: #e0e0e8; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
         header { padding: 16px 24px; background: #111119; border-bottom: 1px solid #1c1c2c; display: flex; align-items: center; gap: 16px; }
         header h1 { font-size: 16px; font-weight: 600; color: #7a8abf; }
@@ -54,18 +54,18 @@
         .sidebar-tabs button { flex: 1; padding: 10px; border: none; background: none; color: #555; font-size: 11px; font-family: inherit; cursor: pointer; border-bottom: 2px solid transparent; }
         .sidebar-tabs button.active { color: #e0e0e8; border-bottom-color: #667eea; }
 
-        .sidebar-panels { flex: 1; overflow-y: auto; min-height: 0; }
-        .panel { display: none; padding: 16px; }
-        .panel.active { display: block; }
+        .sidebar-panels { flex: 1; overflow: hidden; min-height: 0; display: flex; flex-direction: column; }
+        .panel { display: none; padding: 16px; overflow-y: auto; flex: 1; min-height: 0; }
+        .panel.active { display: flex; flex-direction: column; }
 
-        .transcript { display: flex; flex-direction: column; gap: 8px; }
+        .transcript { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; }
         .bubble { padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; max-width: 90%; word-wrap: break-word; }
         .bubble.avatar { background: #1a2540; align-self: flex-start; border-bottom-left-radius: 4px; }
         .bubble.user { background: #1a3528; align-self: flex-end; border-bottom-right-radius: 4px; }
         .bubble .role { font-size: 9px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
         .empty-state { color: #333; text-align: center; padding: 40px 20px; font-size: 13px; }
 
-        .log { font-family: 'SF Mono', monospace; font-size: 11px; }
+        .log { font-family: 'SF Mono', monospace; font-size: 11px; overflow-y: auto; flex: 1; }
         .log-entry { padding: 4px 8px; margin-bottom: 2px; border-radius: 4px; background: #111119; border-left: 3px solid #2a2a3a; }
         .log-entry .time { color: #3a3a4a; font-size: 10px; }
         .log-entry .name { color: #4ade80; font-weight: 600; margin-left: 4px; }
@@ -137,11 +137,11 @@
                 </div>
             </div>
             <div class="panel" id="panel-commands">
-                <div class="commands-section">
+                <div class="commands-section" style="display:flex;flex-direction:column;flex:1;min-height:0;">
                     <h4>Registered Commands</h4>
-                    <div class="cmd-list" id="cmd-list">
-                        <div class="empty-state">Commands registered via registerCommand() will appear here.</div>
-                    </div>
+                    <div class="cmd-list" id="cmd-list"></div>
+                    <h4 style="margin-top:16px;">Server Events (GenUI)</h4>
+                    <div class="log" id="server-events-log" style="flex:1;overflow-y:auto;"></div>
                 </div>
             </div>
         </div>
@@ -179,7 +179,7 @@ function doConnect() {
     // Register a demo command
     sdk.registerCommand('end-session', 'ending call now', (match) => {
         logEvent('command', `Command matched: "${match.command}" in "${match.text.substring(0, 50)}"`);
-        sdk.end();
+        doDisconnect();
     });
     updateCommandList();
 
@@ -198,7 +198,8 @@ function doConnect() {
     });
 
     sdk.on(KalturaAvatarSDK.Events.USER_SPEECH, ({ text, isFinal }) => {
-        if (isFinal) addBubble('user', text);
+        if (!isFinal) return;
+        addBubble('user', text);
     });
 
     sdk.on(KalturaAvatarSDK.Events.DISCONNECTED, () => {
@@ -211,6 +212,17 @@ function doConnect() {
 
     sdk.on(KalturaAvatarSDK.Events.GENUI, ({ type, data }) => {
         logEvent('genui', `${type}: ${JSON.stringify(data).substring(0, 80)}`);
+        addServerEvent(type, data);
+    });
+
+    sdk.on(KalturaAvatarSDK.Events.CONTACT_COLLECTION, ({ type }) => {
+        logEvent('contact', `Contact collection requested: ${type}`);
+        const value = prompt(`The avatar is asking for your ${type}. Enter it or cancel to skip:`);
+        if (value) {
+            sdk.submitContact(type, value);
+        } else {
+            sdk.rejectContact(type);
+        }
     });
 
     // Start connection
@@ -233,7 +245,6 @@ function doSendText() {
     if (!text || !sdk) return;
     sdk.sendText(text);
     input.value = '';
-    // Bubble is added by the USER_SPEECH event handler when server echoes back
 }
 
 function doInjectDPP() {
@@ -301,7 +312,24 @@ function logEvent(type, text, data) {
 
 function updateCommandList() {
     const list = document.getElementById('cmd-list');
-    list.innerHTML = '<div class="cmd"><strong>end-session</strong> — triggers on "ending call now"</div>';
+    if (!sdk) { list.innerHTML = ''; return; }
+    const commands = sdk.getCommands ? sdk.getCommands() : [];
+    if (commands.length === 0) {
+        list.innerHTML = '<div class="cmd"><strong>end-session</strong> — triggers on "ending call now"</div>';
+    } else {
+        list.innerHTML = commands.map(c => `<div class="cmd"><strong>${escapeHtml(c.name)}</strong> — ${escapeHtml(String(c.pattern))}</div>`).join('');
+    }
+}
+
+function addServerEvent(type, data) {
+    const log = document.getElementById('server-events-log');
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const detail = data ? JSON.stringify(data).substring(0, 200) : '';
+    entry.innerHTML = `<span class="time">${time}</span><span class="name">${escapeHtml(type)}</span>${detail ? `<span class="detail">${escapeHtml(detail)}</span>` : ''}`;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
 }
 
 function escapeHtml(text) {
