@@ -82,27 +82,24 @@ await sdk.start();
 ## Project Structure
 
 ```
-├── sdk-socket/           ← Socket SDK: Direct Socket.IO + WebRTC connection
-│   ├── dist/             ← Production bundle + TypeScript declarations
-│   ├── src/              ← Source code
-│   ├── tests/            ← 125 Playwright tests
-│   ├── examples/demo/    ← Interactive demo app
-│   └── README.md         ← Complete documentation
+├── sdk-socket/             ← Socket SDK: Direct Socket.IO + WebRTC
+│   ├── src/                ← Source code
+│   ├── dist/               ← Production bundle + TypeScript declarations
+│   ├── tests/              ← 125 Playwright tests
+│   └── examples/demo/      ← Interactive demo app
 │
-├── sdk-iframe/           ← Iframe SDK: Sandboxed iframe embed
+├── sdk-iframe/             ← Iframe SDK: Sandboxed iframe embed
 │   ├── kaltura-avatar-sdk.min.js
 │   ├── kaltura-avatar-sdk.js
-│   └── kaltura-avatar-sdk.d.ts
+│   ├── kaltura-avatar-sdk.d.ts
+│   └── examples/           ← Demo applications
+│       ├── att_lily/       ← AT&T Seller Hub (sales coaching)
+│       ├── hr_avatar/      ← HR Avatar (interview simulations)
+│       ├── code_interview/ ← Code Interview (pair programming)
+│       └── basic_demo/     ← Minimal starter
 │
-├── examples/             ← Demo applications (using Iframe SDK)
-│   ├── att_lily/         ← AT&T Seller Hub (sales coaching)
-│   ├── hr_avatar/        ← HR Avatar (interview simulations)
-│   ├── code_interview/   ← Code Interview (pair programming)
-│   ├── basic_demo/       ← Minimal starter
-│   └── test_harness/     ← SDK testing tool
-│
-├── AGENTS.md             ← AI Agent guide (Iframe SDK reference + RICECO)
-└── index.html            ← Landing page (GitHub Pages)
+├── AGENTS.md               ← AI Agent guide (Iframe SDK reference + RICECO)
+└── index.html              ← Landing page (GitHub Pages)
 ```
 
 ## Live Demos
@@ -110,10 +107,10 @@ await sdk.start();
 | Demo | SDK | Description | Link |
 |------|-----|-------------|------|
 | **Socket SDK Demo** | Socket | GenUI rendering, events panel, transcript, full control | [Launch](sdk-socket/examples/demo/) |
-| **AT&T Seller Hub** | Iframe | Dual-avatar sales coaching with knowledge checks | [Launch](examples/att_lily/) |
-| **HR Avatar** | Iframe | Interview simulations with AI call analysis | [Launch](examples/hr_avatar/) |
-| **Code Interview** | Iframe | Pair programming with live code context | [Launch](examples/code_interview/) |
-| **Basic Demo** | Iframe | Minimal starter example | [Launch](examples/basic_demo/) |
+| **AT&T Seller Hub** | Iframe | Dual-avatar sales coaching with knowledge checks | [Launch](sdk-iframe/examples/att_lily/) |
+| **HR Avatar** | Iframe | Interview simulations with AI call analysis | [Launch](sdk-iframe/examples/hr_avatar/) |
+| **Code Interview** | Iframe | Pair programming with live code context | [Launch](sdk-iframe/examples/code_interview/) |
+| **Basic Demo** | Iframe | Minimal starter example | [Launch](sdk-iframe/examples/basic_demo/) |
 
 All demos run via any static server: `python3 -m http.server 8080`
 

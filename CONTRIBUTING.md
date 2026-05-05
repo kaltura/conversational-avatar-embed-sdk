@@ -3,21 +3,21 @@
 ## Repository Layout
 
 ```
-├── sdk-socket/          ← Socket SDK (Direct Socket.IO + WebRTC)
-│   ├── src/             ← Source code (single UMD file)
-│   ├── dist/            ← Built output (JS + TypeScript declarations)
-│   ├── tests/           ← Playwright tests (125 tests)
-│   └── examples/demo/   ← Interactive demo app
+├── sdk-socket/            ← Socket SDK (Direct Socket.IO + WebRTC)
+│   ├── src/               ← Source code (single UMD file)
+│   ├── dist/              ← Built output (JS + TypeScript declarations)
+│   ├── tests/             ← Playwright tests (125 tests)
+│   └── examples/demo/     ← Interactive demo app
 │
-├── sdk-iframe/          ← Iframe SDK (sandboxed iframe embed)
+├── sdk-iframe/            ← Iframe SDK (sandboxed iframe embed)
+│   ├── kaltura-avatar-sdk.min.js / .js / .d.ts
+│   └── examples/          ← Demo applications
+│       ├── att_lily/      ← AT&T Seller Hub
+│       ├── hr_avatar/     ← HR Avatar + shared Lambda backend
+│       ├── code_interview/ ← Code Interview
+│       └── basic_demo/    ← Minimal starter
 │
-├── examples/            ← Demo applications (using Iframe SDK)
-│   ├── att_lily/        ← AT&T Seller Hub
-│   ├── hr_avatar/       ← HR Avatar + shared Lambda backend
-│   ├── code_interview/  ← Code Interview
-│   └── basic_demo/      ← Minimal starter
-│
-└── .github/workflows/   ← CI and GitHub Pages deployment
+└── .github/workflows/     ← CI and GitHub Pages deployment
 ```
 
 ## Working on the Socket SDK
@@ -35,10 +35,10 @@ Keep `dist/kaltura-avatar-sdk.d.ts` in sync with any API changes.
 
 ## Add a New Demo Application (Iframe SDK)
 
-Each demo lives in its own directory under `examples/`:
+Each demo lives in its own directory under `sdk-iframe/examples/`:
 
 ```
-examples/your_demo/
+sdk-iframe/examples/your_demo/
 ├── index.html              ← Entry point
 ├── your-demo.js            ← Application logic
 ├── your-demo.css           ← Styles
@@ -49,10 +49,10 @@ examples/your_demo/
 
 ### Steps
 
-1. Create your directory under `examples/`
+1. Create your directory under `sdk-iframe/examples/`
 2. Add `index.html` that loads the SDK:
    ```html
-   <script src="../../sdk-iframe/kaltura-avatar-sdk.min.js"></script>
+   <script src="../../kaltura-avatar-sdk.min.js"></script>
    ```
 3. Write your `base_prompt.txt` defining the avatar persona
 4. Wire up the SDK (see existing demos for patterns)

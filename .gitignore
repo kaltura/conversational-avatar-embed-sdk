@@ -15,9 +15,9 @@ package-lock.json
 *.log
 
 # Lambda build artifacts
-examples/hr_avatar/lambda/function.zip
-examples/hr_avatar/lambda/.api-url
-examples/hr_avatar/lambda/benchmark_results.json
+sdk-iframe/examples/hr_avatar/lambda/function.zip
+sdk-iframe/examples/hr_avatar/lambda/.api-url
+sdk-iframe/examples/hr_avatar/lambda/benchmark_results.json
 
 # Python
 __pycache__/

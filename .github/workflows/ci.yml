@@ -30,10 +30,10 @@ jobs:
         run: npx wait-on http://localhost:8080 --timeout 10000
 
       - name: Run HR Avatar E2E tests
-        run: node examples/hr_avatar/test-e2e.js
+        run: node sdk-iframe/examples/hr_avatar/test-e2e.js
 
       - name: Run Code Interview E2E tests
-        run: node examples/code_interview/test-e2e.js
+        run: node sdk-iframe/examples/code_interview/test-e2e.js
 
   test-socket:
     name: Socket SDK — Unit & GenUI Tests

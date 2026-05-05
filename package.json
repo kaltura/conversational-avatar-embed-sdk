@@ -5,7 +5,7 @@
   "main": "sdk-iframe/kaltura-avatar-sdk.js",
   "scripts": {
     "test": "npm run test:iframe && npm run test:socket",
-    "test:iframe": "node examples/hr_avatar/test-e2e.js && node examples/code_interview/test-e2e.js",
+    "test:iframe": "node sdk-iframe/examples/hr_avatar/test-e2e.js && node sdk-iframe/examples/code_interview/test-e2e.js",
     "test:socket": "cd sdk-socket && npm test",
     "test:socket:live": "cd sdk-socket && npm run test:live",
     "test:install": "npx playwright install chromium",

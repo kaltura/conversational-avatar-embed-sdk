@@ -42,7 +42,7 @@ npm run test:all  # All including live integration
 
 - Source: `sdk-iframe/kaltura-avatar-sdk.min.js`
 - Types: `sdk-iframe/kaltura-avatar-sdk.d.ts`
-- Demos: `examples/` (att_lily, hr_avatar, code_interview, basic_demo)
+- Demos: `sdk-iframe/examples/` (att_lily, hr_avatar, code_interview, basic_demo)
 
 ### Key Iframe SDK Patterns
 
