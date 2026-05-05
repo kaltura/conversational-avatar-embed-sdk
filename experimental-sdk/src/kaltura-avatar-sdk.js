@@ -109,7 +109,7 @@
     RECONNECT_BASE_DELAY: 1000,
     MAX_RECONNECT_ATTEMPTS: 5,
     DPP_DEBOUNCE_MS: 200,
-    ICE_GATHER_TIMEOUT: 3000,
+    ICE_GATHER_TIMEOUT: 1000,
     PEER_NAME: 'SDKUser'
   });
 
@@ -701,6 +701,18 @@
       if (this._pc.iceGatheringState === 'complete') return;
       return new Promise((resolve) => {
         const timeout = setTimeout(resolve, DEFAULTS.ICE_GATHER_TIMEOUT);
+        let hasCandidate = false;
+        this._pc.onicecandidate = (e) => {
+          if (e.candidate && !hasCandidate) {
+            hasCandidate = true;
+            // With relay-only policy, first TURN candidate is sufficient
+            clearTimeout(timeout);
+            resolve();
+          } else if (!e.candidate) {
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
         this._pc.onicegatheringstatechange = () => {
           if (this._pc.iceGatheringState === 'complete') {
             clearTimeout(timeout);
@@ -1761,6 +1773,9 @@
       this._emitter.emit(Events.CONNECTING);
       this._resetInternalState();
 
+      // Pre-acquire mic in parallel with socket connection (saves ~2-3s)
+      this._preAcquireMic();
+
       this._stickyId = generateId(8) + generateId(8);
       this._roomId = generateId(8);
 
@@ -2154,10 +2169,13 @@
           videoElement: videoEl
         });
 
+        // Don't block approvedPermissions on video — approve as soon as WHEP negotiation
+        // completes (answer set). Audio+video tracks will arrive shortly after.
+        this._videoReady = true;
+        this._checkApprovePermissions();
+
         trackPromise.then(() => {
-          this._videoReady = true;
           this._emitter.emit(Events.VIDEO_READY, { element: this._videoElement });
-          this._checkApprovePermissions();
         });
       } catch (err) {
         this._log.warn('WHEP failed, falling back to audio', err.message);
@@ -2175,18 +2193,25 @@
       });
     }
 
+    _preAcquireMic() {
+      this._micPromise = this._mic.acquire({ audio: { echoCancellation: true }, video: false })
+        .then(() => {
+          this._log.debug('Mic pre-acquired');
+          this._emitter.emit(Events.MIC_GRANTED, { stream: this._mic.stream });
+          return true;
+        })
+        .catch((err) => {
+          this._log.warn('Mic permission denied, continuing in text-only mode', err.message);
+          this._emitter.emit(Events.MIC_DENIED, { error: err });
+          return false;
+        });
+    }
+
     async _handlePermissions(constraints) {
-      try {
-        await this._mic.acquire(constraints || { audio: { echoCancellation: true }, video: false });
-        this._micReady = true;
-        this._emitter.emit(Events.MIC_GRANTED, { stream: this._mic.stream });
-        this._checkApprovePermissions();
-      } catch (err) {
-        this._log.warn('Mic permission denied, continuing in text-only mode', err.message);
-        this._emitter.emit(Events.MIC_DENIED, { error: err });
-        this._micReady = true;
-        this._checkApprovePermissions();
-      }
+      // Mic was already pre-acquired at connect() — just await that promise
+      await this._micPromise;
+      this._micReady = true;
+      this._checkApprovePermissions();
     }
 
     _checkApprovePermissions() {
