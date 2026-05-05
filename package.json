@@ -1,13 +1,13 @@
 {
   "name": "conversational-avatar-embed-sdk",
   "version": "2.0.0",
-  "description": "Kaltura Avatar SDK — Embed AI avatar conversations in any website",
-  "main": "sdk/kaltura-avatar-sdk.js",
+  "description": "Kaltura Avatar SDK — Embed AI avatar conversations in any website (Socket + Iframe)",
+  "main": "sdk-iframe/kaltura-avatar-sdk.js",
   "scripts": {
-    "test": "npm run test:v1 && npm run test:v2",
-    "test:v1": "node examples/hr_avatar/test-e2e.js && node examples/code_interview/test-e2e.js",
-    "test:v2": "cd sdk-v2 && npm test",
-    "test:v2:live": "cd sdk-v2 && npm run test:live",
+    "test": "npm run test:iframe && npm run test:socket",
+    "test:iframe": "node examples/hr_avatar/test-e2e.js && node examples/code_interview/test-e2e.js",
+    "test:socket": "cd sdk-socket && npm test",
+    "test:socket:live": "cd sdk-socket && npm run test:live",
     "test:install": "npx playwright install chromium",
     "demo": "python3 -m http.server 8080"
   },
@@ -26,7 +26,9 @@
     "video-chat",
     "real-time",
     "genui",
-    "interactive"
+    "interactive",
+    "iframe",
+    "socket.io"
   ],
   "author": "Kaltura",
   "license": "MIT",

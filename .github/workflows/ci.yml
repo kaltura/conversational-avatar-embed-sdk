@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  test-v1:
-    name: SDK v1 (iframe) — E2E Tests
+  test-iframe:
+    name: Iframe SDK — E2E Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,8 +35,8 @@ jobs:
       - name: Run Code Interview E2E tests
         run: node examples/code_interview/test-e2e.js
 
-  test-v2:
-    name: SDK v2 (direct) — Unit & GenUI Tests
+  test-socket:
+    name: Socket SDK — Unit & GenUI Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,14 +46,14 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        working-directory: sdk-v2
+        working-directory: sdk-socket
         run: npm install
 
       - name: Install Playwright browsers
         run: npx playwright install chromium --with-deps
 
       - name: Run unit + GenUI tests (125 tests)
-        working-directory: sdk-v2
+        working-directory: sdk-socket
         run: npm test
 
   lint:
@@ -66,23 +66,23 @@ jobs:
         with:
           node-version: 20
 
-      - name: Check SDK v1 file size (must be <8KB minified)
+      - name: Check Iframe SDK file size (must be <8KB minified)
         run: |
           MAX_SIZE=8192
-          SIZE=$(wc -c < sdk/kaltura-avatar-sdk.min.js)
-          echo "SDK v1 minified: ${SIZE} bytes"
+          SIZE=$(wc -c < sdk-iframe/kaltura-avatar-sdk.min.js)
+          echo "Iframe SDK minified: ${SIZE} bytes"
           if [ "$SIZE" -gt "$MAX_SIZE" ]; then
-            echo "::error::SDK v1 size ($SIZE bytes) exceeds limit ($MAX_SIZE bytes)"
+            echo "::error::Iframe SDK size ($SIZE bytes) exceeds limit ($MAX_SIZE bytes)"
             exit 1
           fi
 
-      - name: Check SDK v2 file size (must be <120KB)
+      - name: Check Socket SDK file size (must be <120KB)
         run: |
           MAX_SIZE=122880
-          SIZE=$(wc -c < sdk-v2/dist/kaltura-avatar-sdk.js)
-          echo "SDK v2: ${SIZE} bytes"
+          SIZE=$(wc -c < sdk-socket/dist/kaltura-avatar-sdk.js)
+          echo "Socket SDK: ${SIZE} bytes"
           if [ "$SIZE" -gt "$MAX_SIZE" ]; then
-            echo "::error::SDK v2 size ($SIZE bytes) exceeds limit ($MAX_SIZE bytes)"
+            echo "::error::Socket SDK size ($SIZE bytes) exceeds limit ($MAX_SIZE bytes)"
             exit 1
           fi
 
@@ -93,8 +93,8 @@ jobs:
             node -e "JSON.parse(require('fs').readFileSync('$f', 'utf8'))" || exit 1
           done
 
-      - name: Check for console.log in production SDK v1
+      - name: Check for console.log in production Iframe SDK
         run: |
-          if grep -n "console.log" sdk/kaltura-avatar-sdk.js | grep -v "console.error"; then
-            echo "::warning::Found console.log in SDK v1 source (only console.error is allowed)"
+          if grep -n "console.log" sdk-iframe/kaltura-avatar-sdk.js | grep -v "console.error"; then
+            echo "::warning::Found console.log in Iframe SDK source (only console.error is allowed)"
           fi

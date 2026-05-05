@@ -1,7 +1,7 @@
 {
-  "name": "@kaltura/avatar-sdk-v2",
+  "name": "@kaltura/avatar-sdk-socket",
   "version": "2.0.0",
-  "description": "Kaltura Avatar SDK v2 — Direct Socket.IO + WebRTC connection to AI Avatars (no iframe)",
+  "description": "Kaltura Avatar SDK (Socket) — Direct Socket.IO + WebRTC connection to AI Avatars. Full control over video, audio, events, and GenUI rendering.",
   "license": "MIT",
   "main": "dist/kaltura-avatar-sdk.js",
   "types": "dist/kaltura-avatar-sdk.d.ts",
@@ -33,7 +33,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/kaltura/conversational-avatar-embed-sdk",
-    "directory": "sdk-v2"
+    "directory": "sdk-socket"
   },
   "engines": {
     "node": ">=16.0.0"

@@ -8,16 +8,6 @@ Built as a reference implementation demonstrating:
 - Post-session AI analysis with structured scoring
 - Context-aware SME escalation UX
 
-## Screenshots
-
-| Login | Coaching (Lily) | Knowledge Check Cards |
-|-------|----------------|----------------------|
-| ![Login](../../sdk/images/att-lily-login.png) | ![Coaching](../../sdk/images/att-lily-coaching.png) | ![Cards](../../sdk/images/att-lily-cards.png) |
-
-Full app layout:
-
-![App Shell](../../sdk/images/att-lily-app-shell.png)
-
 ## Quick Start
 
 ```bash

@@ -30,4 +30,3 @@ playwright-report/
 
 # Screenshots (dev-only, not committed)
 *.png
-!sdk/images/*.png

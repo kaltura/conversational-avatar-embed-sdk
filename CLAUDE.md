@@ -4,21 +4,23 @@
 
 ## Project Context
 
-This repository provides two SDKs for embedding Kaltura AI Avatars into web applications:
+This repository provides two SDKs for embedding Kaltura AI Avatars into web applications. They are not versions — they are different integration approaches for different use cases:
 
-- **SDK v1** (`sdk/`) — Iframe-based, ~6KB minified, zero dependencies. Simple embed via postMessage.
-- **SDK v2** (`sdk-v2/`) — Direct Socket.IO + WebRTC connection. Full control over video, audio, and GenUI rendering. Richer API, real-time events, extensible renderer system.
+- **Socket SDK** (`sdk-socket/`) — Direct Socket.IO + WebRTC connection. Full control over video, audio, and GenUI rendering. Choose this when you need custom video styling, event-driven architecture, GenUI content rendering, or low latency.
+- **Iframe SDK** (`sdk-iframe/`) — Sandboxed iframe embed, ~6KB minified, zero dependencies. Choose this when you need drop-in simplicity, iframe isolation, minimal bundle size, or a quick proof-of-concept.
 
-## SDK v2 (Recommended for new projects)
+Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowledge Base, same server-side AI.
 
-- Source: `sdk-v2/src/kaltura-avatar-sdk.js`
-- Dist: `sdk-v2/dist/kaltura-avatar-sdk.js`
-- Types: `sdk-v2/dist/kaltura-avatar-sdk.d.ts`
-- Demo: `sdk-v2/examples/demo/index.html`
-- Tests: `sdk-v2/tests/e2e/` (125 tests via Playwright)
+## Socket SDK (full control)
+
+- Source: `sdk-socket/src/kaltura-avatar-sdk.js`
+- Dist: `sdk-socket/dist/kaltura-avatar-sdk.js`
+- Types: `sdk-socket/dist/kaltura-avatar-sdk.d.ts`
+- Demo: `sdk-socket/examples/demo/index.html`
+- Tests: `sdk-socket/tests/e2e/` (125 tests via Playwright)
 - Peer dependency: Socket.IO client v4
 
-### Key v2 Patterns
+### Key Socket SDK Patterns
 
 1. **Connect**: `await sdk.connect()` (no iframe, direct socket)
 2. **Events**: `sdk.on('avatar-speech', ...)`, `sdk.on('user-speech', ...)`
@@ -27,22 +29,22 @@ This repository provides two SDKs for embedding Kaltura AI Avatars into web appl
 5. **GenUI**: Built-in renderers for charts, tables, videos, code, diagrams, etc.
 6. **Transcript**: `sdk.getTranscript()`, `sdk.downloadTranscript()`
 
-### Running v2 Tests
+### Running Socket SDK Tests
 
 ```bash
-cd sdk-v2
+cd sdk-socket
 npm install
 npm test          # 125 unit + GenUI tests (~2s)
 npm run test:all  # All including live integration
 ```
 
-## SDK v1 (Legacy / simple use cases)
+## Iframe SDK (simple embed)
 
-- Source: `sdk/kaltura-avatar-sdk.min.js`
-- Types: `sdk/kaltura-avatar-sdk.d.ts`
+- Source: `sdk-iframe/kaltura-avatar-sdk.min.js`
+- Types: `sdk-iframe/kaltura-avatar-sdk.d.ts`
 - Demos: `examples/` (att_lily, hr_avatar, code_interview, basic_demo)
 
-### Key v1 Patterns
+### Key Iframe SDK Patterns
 
 1. **DPP Injection**: Always inject on `SHOWING_AGENT` event with 500ms delay
 2. **Spoken Commands**: Pattern-match on `AGENT_TALKED` text
@@ -51,17 +53,18 @@ npm run test:all  # All including live integration
 ## When Users Ask to Build Something
 
 If a user says "Build me X using this SDK" or provides a client ID / flow ID:
-1. **Default to SDK v2** unless they specifically need iframe isolation
-2. Read AGENTS.md for the full API and patterns
+1. **Default to Socket SDK** unless they specifically need iframe isolation or minimal bundle
+2. Read AGENTS.md for the Iframe SDK API, or sdk-socket/README.md for Socket SDK API
 3. Customize the DPP structure and avatar spoken commands for their use case
 4. Generate both the JavaScript app code AND the Kaltura Studio Knowledge Base prompt
 
 ## Testing
 
 ```bash
-npm test                    # All tests (v1 + v2)
-npm run test:v2             # SDK v2 unit tests only
-cd sdk-v2 && npm test       # Same, from sdk-v2 directory
+npm test                        # All tests (iframe + socket)
+npm run test:socket             # Socket SDK unit tests only
+cd sdk-socket && npm test       # Same, from sdk-socket directory
+npm run test:iframe             # Iframe SDK E2E tests
 ```
 
 Demos run on any static server: `python3 -m http.server 8080`

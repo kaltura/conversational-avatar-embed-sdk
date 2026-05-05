@@ -2,29 +2,36 @@
 
 Embed AI avatar conversations in any website. Real-time video, speech recognition, dynamic context injection, and rich visual content — all from a few lines of JavaScript.
 
-## Two SDKs, One Avatar
+## Two Integration Approaches
 
-| | **SDK v2** (Recommended) | **SDK v1** (Legacy) |
+Choose the SDK that fits your project:
+
+| | **Socket SDK** | **Iframe SDK** |
 |---|---|---|
+| **Best for** | Full-featured apps needing control over video, events, and visuals | Quick embeds, sandboxed environments, or minimal integration effort |
 | **Connection** | Direct Socket.IO + WebRTC | Iframe + postMessage |
-| **Size** | ~45KB (+ Socket.IO peer dep) | ~6KB, zero deps |
-| **Video control** | You own the `<video>` element | Iframe-managed |
-| **GenUI rendering** | Built-in charts, tables, code, diagrams, video | Events only |
-| **Latency** | Lower (no iframe layer) | Standard |
-| **CSP** | No `frame-src` needed | Requires `frame-src` |
-| **Path** | [`sdk-v2/`](sdk-v2/) | [`sdk/`](sdk/) |
+| **You get** | Own the `<video>` element, all socket events, GenUI rendering, extensible plugin system | Zero-config embed, automatic UI, browser sandbox isolation |
+| **Size** | ~100KB (+ Socket.IO peer dep) | ~6KB, zero dependencies |
+| **GenUI** | Built-in renderers for charts, tables, code, diagrams, video, images | Event notifications only (render yourself) |
+| **Latency** | Lower (no iframe message-passing layer) | Standard |
+| **CSP** | No `frame-src` needed | Requires `frame-src` allow |
+| **Path** | [`sdk-socket/`](sdk-socket/) | [`sdk-iframe/`](sdk-iframe/) |
 
-**Use v2 for new projects.** Use v1 if you need maximum simplicity or iframe sandboxing.
+**Choose Socket SDK** when you need: custom video styling, GenUI content rendering, real-time event access, low latency, or CSP-restricted environments.
+
+**Choose Iframe SDK** when you need: drop-in simplicity, iframe sandboxing, minimal bundle size, or a quick proof-of-concept.
+
+Both SDKs connect to the same Kaltura AI Avatar backend — same avatars, same Knowledge Base, same server-side AI.
 
 ---
 
-## Quick Start — SDK v2
+## Quick Start — Socket SDK
 
 ```html
 <div id="avatar" style="width: 800px; height: 600px; background: #000;"></div>
 
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-v2/dist/kaltura-avatar-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-socket/dist/kaltura-avatar-sdk.js"></script>
 
 <script>
 const sdk = new KalturaAvatarSDK({
@@ -40,16 +47,16 @@ sdk.connect();
 </script>
 ```
 
-[Full v2 documentation →](sdk-v2/README.md) · [TypeScript API →](sdk-v2/dist/kaltura-avatar-sdk.d.ts)
+[Full Socket SDK documentation →](sdk-socket/README.md) · [TypeScript API →](sdk-socket/dist/kaltura-avatar-sdk.d.ts)
 
 ---
 
-## Quick Start — SDK v1
+## Quick Start — Iframe SDK
 
 ```html
 <div id="avatar" style="width: 800px; height: 600px;"></div>
 
-<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk/kaltura-avatar-sdk.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-iframe/kaltura-avatar-sdk.min.js"></script>
 
 <script>
 const sdk = new KalturaAvatarSDK({
@@ -68,43 +75,45 @@ await sdk.start();
 </script>
 ```
 
+[Iframe SDK API reference →](AGENTS.md) · [TypeScript API →](sdk-iframe/kaltura-avatar-sdk.d.ts)
+
 ---
 
 ## Project Structure
 
 ```
-├── sdk-v2/               ← SDK v2: Direct connection (recommended)
+├── sdk-socket/           ← Socket SDK: Direct Socket.IO + WebRTC connection
 │   ├── dist/             ← Production bundle + TypeScript declarations
 │   ├── src/              ← Source code
 │   ├── tests/            ← 125 Playwright tests
 │   ├── examples/demo/    ← Interactive demo app
-│   └── README.md         ← Complete v2 documentation
+│   └── README.md         ← Complete documentation
 │
-├── sdk/                  ← SDK v1: Iframe-based (legacy)
+├── sdk-iframe/           ← Iframe SDK: Sandboxed iframe embed
 │   ├── kaltura-avatar-sdk.min.js
 │   ├── kaltura-avatar-sdk.js
 │   └── kaltura-avatar-sdk.d.ts
 │
-├── examples/             ← Demo applications (v1)
+├── examples/             ← Demo applications (using Iframe SDK)
 │   ├── att_lily/         ← AT&T Seller Hub (sales coaching)
 │   ├── hr_avatar/        ← HR Avatar (interview simulations)
 │   ├── code_interview/   ← Code Interview (pair programming)
 │   ├── basic_demo/       ← Minimal starter
 │   └── test_harness/     ← SDK testing tool
 │
-├── AGENTS.md             ← AI Agent guide (complete SDK reference)
+├── AGENTS.md             ← AI Agent guide (Iframe SDK reference + RICECO)
 └── index.html            ← Landing page (GitHub Pages)
 ```
 
 ## Live Demos
 
-| Demo | Description | Link |
-|------|-------------|------|
-| **SDK v2 Demo** | Interactive demo with GenUI, events panel, transcript | [Launch](sdk-v2/examples/demo/) |
-| **AT&T Seller Hub** | Dual-avatar sales coaching with knowledge checks | [Launch](examples/att_lily/) |
-| **HR Avatar** | Interview simulations with AI call analysis | [Launch](examples/hr_avatar/) |
-| **Code Interview** | Pair programming with live code context | [Launch](examples/code_interview/) |
-| **Basic Demo** | Minimal v1 starter example | [Launch](examples/basic_demo/) |
+| Demo | SDK | Description | Link |
+|------|-----|-------------|------|
+| **Socket SDK Demo** | Socket | GenUI rendering, events panel, transcript, full control | [Launch](sdk-socket/examples/demo/) |
+| **AT&T Seller Hub** | Iframe | Dual-avatar sales coaching with knowledge checks | [Launch](examples/att_lily/) |
+| **HR Avatar** | Iframe | Interview simulations with AI call analysis | [Launch](examples/hr_avatar/) |
+| **Code Interview** | Iframe | Pair programming with live code context | [Launch](examples/code_interview/) |
+| **Basic Demo** | Iframe | Minimal starter example | [Launch](examples/basic_demo/) |
 
 All demos run via any static server: `python3 -m http.server 8080`
 
@@ -140,27 +149,27 @@ The agent generates both the **app code** and the **Knowledge Base prompt** for 
 # All tests
 npm test
 
-# SDK v2 only (125 unit + GenUI tests)
-cd sdk-v2 && npm test
+# Socket SDK only (125 unit + GenUI tests, ~2 seconds)
+cd sdk-socket && npm test
 
-# SDK v1 E2E tests
-npm run test:v1
+# Iframe SDK E2E tests
+npm run test:iframe
 ```
 
 ## Documentation
 
-- [SDK v2 — Complete Guide](sdk-v2/README.md) — Configuration, events, methods, error codes
-- [AI Agent Guide](AGENTS.md) — Full reference for AI coding agents (DPP, commands, RICECO)
-- [TypeScript API (v2)](sdk-v2/dist/kaltura-avatar-sdk.d.ts) — Complete type definitions
-- [TypeScript API (v1)](sdk/kaltura-avatar-sdk.d.ts) — v1 type definitions
+- [Socket SDK — Complete Guide](sdk-socket/README.md) — Configuration, events, methods, GenUI, error codes
+- [Iframe SDK — AI Agent Guide](AGENTS.md) — Full API reference, DPP patterns, RICECO framework
+- [TypeScript API (Socket)](sdk-socket/dist/kaltura-avatar-sdk.d.ts) — Complete type definitions
+- [TypeScript API (Iframe)](sdk-iframe/kaltura-avatar-sdk.d.ts) — Type definitions
 - [Contributing](CONTRIBUTING.md) — How to add demo applications
 
 ## Browser Support
 
 | Feature | Chrome | Firefox | Safari | Edge |
 |---------|--------|---------|--------|------|
-| SDK v2 (WebRTC) | 72+ | 68+ | 14+ | 79+ |
-| SDK v1 (iframe) | 60+ | 55+ | 11+ | 79+ |
+| Socket SDK (WebRTC) | 72+ | 68+ | 14+ | 79+ |
+| Iframe SDK | 60+ | 55+ | 11+ | 79+ |
 
 ## License
 

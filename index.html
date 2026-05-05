@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kaltura Avatar SDK — Embed AI Avatars in Any Website</title>
-    <meta name="description" content="JavaScript SDK for embedding AI avatar conversations with real-time video, speech recognition, and rich visual content. Works with Claude, ChatGPT, or any AI coding agent.">
-    <meta name="keywords" content="kaltura, avatar, ai, sdk, conversational ai, webrtc, embed, video chat, javascript, real-time">
+    <meta name="description" content="JavaScript SDK for embedding AI avatar conversations with real-time video, speech recognition, and rich visual content. Two integration options: Socket (full control) or Iframe (drop-in simple).">
+    <meta name="keywords" content="kaltura, avatar, ai, sdk, conversational ai, webrtc, embed, video chat, javascript, real-time, socket.io, iframe">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -72,9 +72,7 @@
         }
         .sdk-card:hover { border-color: #7b93ff; }
         .sdk-card h3 { font-size: 16px; margin-bottom: 6px; color: #e0e0e8; }
-        .sdk-card .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
-        .sdk-card .tag-new { background: #1a3a28; color: #4ade80; }
-        .sdk-card .tag-legacy { background: #2a2a3a; color: #888; }
+        .sdk-card .use-case { font-size: 12px; color: #4ade80; margin-bottom: 8px; font-weight: 500; }
         .sdk-card p { font-size: 13px; margin-bottom: 12px; }
         .sdk-card a { font-size: 13px; }
         .demos {
@@ -121,33 +119,36 @@
 <body>
 
 <div class="badges">
-    <span class="badge"><strong>v2</strong> Direct WebRTC</span>
-    <span class="badge"><strong>v1</strong> Iframe embed</span>
+    <span class="badge"><strong>Socket</strong> Direct WebRTC</span>
+    <span class="badge"><strong>Iframe</strong> Sandboxed embed</span>
     <span class="badge">MIT License</span>
     <span class="badge">TypeScript ready</span>
 </div>
 <h1>Kaltura Avatar SDK</h1>
 <p>Embed AI avatar conversations in any website. Real-time video, speech recognition, dynamic context injection, and rich visual content (charts, tables, code, diagrams) — all from a few lines of JavaScript.</p>
 
-<h2>Choose Your SDK</h2>
+<h2>Choose Your Integration</h2>
+<p>Both SDKs connect to the same Kaltura AI Avatar backend. Choose based on how much control you need:</p>
 <div class="sdk-cards">
     <div class="sdk-card">
-        <h3>SDK v2<span class="tag tag-new">Recommended</span></h3>
-        <p>Direct Socket.IO + WebRTC connection. Full control over video, audio, GenUI rendering, and all events. ~45KB + Socket.IO.</p>
-        <a href="sdk-v2/README.md">Documentation</a> · <a href="sdk-v2/examples/demo/">Live Demo</a>
+        <h3>Socket SDK</h3>
+        <div class="use-case">Full control over video, audio, events &amp; visuals</div>
+        <p>Direct Socket.IO + WebRTC connection. You own the video element. Built-in GenUI rendering (charts, tables, code, diagrams). Extensible plugin system. ~100KB + Socket.IO.</p>
+        <a href="sdk-socket/README.md">Documentation</a> · <a href="sdk-socket/examples/demo/">Live Demo</a>
     </div>
     <div class="sdk-card">
-        <h3>SDK v1<span class="tag tag-legacy">Legacy</span></h3>
-        <p>Iframe-based embed. Zero dependencies, ~6KB minified. Simple drop-in for basic use cases.</p>
+        <h3>Iframe SDK</h3>
+        <div class="use-case">Drop-in embed with zero configuration</div>
+        <p>Sandboxed iframe embed. Zero dependencies, ~6KB minified. Automatic UI handling. Ideal for quick integrations or when you need browser isolation.</p>
         <a href="AGENTS.md">Documentation</a> · <a href="examples/basic_demo/">Basic Demo</a>
     </div>
 </div>
 
-<h2>Quick Start (v2)</h2>
+<h2>Quick Start (Socket SDK)</h2>
 <pre>&lt;div id="avatar" style="width:800px;height:600px;background:#000"&gt;&lt;/div&gt;
 
 &lt;script src="https://cdn.socket.io/4.7.2/socket.io.min.js"&gt;&lt;/script&gt;
-&lt;script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-v2/dist/kaltura-avatar-sdk.js"&gt;&lt;/script&gt;
+&lt;script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-socket/dist/kaltura-avatar-sdk.js"&gt;&lt;/script&gt;
 
 &lt;script&gt;
 const sdk = new KalturaAvatarSDK({
@@ -167,30 +168,31 @@ sdk.connect();
 
 <h2>Live Demos</h2>
 <div class="demos">
-    <a href="sdk-v2/examples/demo/">SDK v2 Demo<span>GenUI, events, transcript, full control</span></a>
+    <a href="sdk-socket/examples/demo/">Socket SDK Demo<span>GenUI, events, transcript, full control</span></a>
     <a href="examples/att_lily/">AT&T Seller Hub<span>Dual-avatar sales coaching</span></a>
     <a href="examples/hr_avatar/">HR Avatar<span>Interview simulations + AI analysis</span></a>
     <a href="examples/code_interview/">Code Interview<span>Pair programming + live code context</span></a>
-    <a href="examples/basic_demo/">Basic Demo<span>Minimal v1 starter example</span></a>
-    <a href="examples/test_harness/">Test Harness<span>All SDK v1 capabilities</span></a>
+    <a href="examples/basic_demo/">Basic Demo<span>Minimal iframe starter example</span></a>
+    <a href="examples/test_harness/">Test Harness<span>All Iframe SDK capabilities</span></a>
 </div>
 
 <h2>Key Features</h2>
 <ul style="margin: 0 0 24px 20px; color: #a0a0b8; font-size: 15px; line-height: 2;">
-    <li><strong>GenUI Rendering</strong> (v2) — Charts, tables, code editors, diagrams, videos, images render automatically</li>
+    <li><strong>GenUI Rendering</strong> (Socket) — Charts, tables, code editors, diagrams, videos, images render automatically</li>
     <li><strong>Dynamic Prompt Injection (DPP)</strong> — Inject JSON context at runtime to control avatar behavior</li>
     <li><strong>Avatar Spoken Commands</strong> — Avatar speaks trigger phrases that fire JavaScript functions</li>
     <li><strong>Transcripts</strong> — Built-in recording with export to text, markdown, or JSON</li>
-    <li><strong>Auto-reconnect</strong> (v2) — Exponential backoff handles network drops gracefully</li>
-    <li><strong>Graceful degradation</strong> (v2) — Falls back to audio-only or text-only automatically</li>
+    <li><strong>Auto-reconnect</strong> (Socket) — Exponential backoff handles network drops gracefully</li>
+    <li><strong>Graceful degradation</strong> (Socket) — Falls back to audio-only or text-only automatically</li>
+    <li><strong>Iframe sandboxing</strong> (Iframe) — Full browser isolation for security-sensitive environments</li>
 </ul>
 
 <h2>Links</h2>
 <ul style="margin: 0 0 24px 20px; color: #a0a0b8; font-size: 15px;">
-    <li><a href="sdk-v2/README.md">SDK v2 Documentation</a> — Configuration, events, methods, error codes</li>
-    <li><a href="AGENTS.md">AI Agent Guide</a> — Full SDK reference + RICECO prompt framework</li>
-    <li><a href="sdk-v2/dist/kaltura-avatar-sdk.d.ts">TypeScript API (v2)</a></li>
-    <li><a href="sdk/kaltura-avatar-sdk.d.ts">TypeScript API (v1)</a></li>
+    <li><a href="sdk-socket/README.md">Socket SDK Documentation</a> — Configuration, events, methods, GenUI, error codes</li>
+    <li><a href="AGENTS.md">Iframe SDK / AI Agent Guide</a> — Full API reference + RICECO prompt framework</li>
+    <li><a href="sdk-socket/dist/kaltura-avatar-sdk.d.ts">TypeScript API (Socket)</a></li>
+    <li><a href="sdk-iframe/kaltura-avatar-sdk.d.ts">TypeScript API (Iframe)</a></li>
     <li><a href="CONTRIBUTING.md">Contributing</a></li>
     <li><a href="https://github.com/kaltura/conversational-avatar-embed-sdk">GitHub</a></li>
 </ul>
