@@ -55,7 +55,11 @@
     MIC_DENIED: 'mic-denied',
 
     GENUI: 'genui',
-    CONTACT_COLLECTION: 'contact-collection',
+    GENUI_BEFORE_RENDER: 'genui:before-render',
+    GENUI_RENDERED: 'genui:rendered',
+    GENUI_HIDDEN: 'genui:hidden',
+    GENUI_INTERACTION: 'genui:interaction',
+    GENUI_ERROR: 'genui:error',
     COMMAND_MATCHED: 'command-matched',
     TRANSCRIPT_ENTRY: 'transcript-entry',
 
@@ -126,6 +130,31 @@
     'showVisualItems', 'showVisualLink', 'showVisualPhoto',
     'showVisualTable', 'showVisualVideo'
   ];
+
+  const GENUI_CATEGORY = Object.freeze({ BOARD: 'board', VISUAL: 'visual' });
+
+  const BOARD_TYPES = new Set([
+    'showLatex', 'showChart', 'showHtml', 'showDiagram', 'showCode', 'showIFrame',
+    'contactEmail', 'contactPhone'
+  ]);
+
+  const GENUI_HIDE_EVENTS = [
+    'hideVisuals', 'hideCode', 'hideDiagram', 'hideIFrame', 'hideMedia', 'hideGeneratedImages'
+  ];
+
+  const HIDE_EVENT_MAP = {
+    hideVisuals: 'visual',
+    hideCode: 'board',
+    hideDiagram: 'board',
+    hideIFrame: 'board',
+    hideMedia: 'visual',
+    hideGeneratedImages: 'visual'
+  };
+
+  const CONTACT_VALIDATION = {
+    email: /^[a-zA-Z0-9.+_-]+@[a-zA-Z0-9.-]+\.[a-zA-Z0-9-]{2,24}$/,
+    phone: /^\d{8,}$/
+  };
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ERROR CLASS
@@ -955,6 +984,676 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // GENUI: LIBRARY LOADER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  class LibraryLoader {
+    constructor(logger) {
+      this._log = logger;
+      this._loaded = new Map();
+      this._providers = new Map();
+      this._urls = new Map([
+        ['chartjs', 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js'],
+        ['mermaid', 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js'],
+        ['katex', 'https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js'],
+        ['katex-css', 'https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css'],
+        ['codemirror', 'https://cdn.jsdelivr.net/npm/codemirror@5/lib/codemirror.js'],
+        ['codemirror-css', 'https://cdn.jsdelivr.net/npm/codemirror@5/lib/codemirror.css']
+      ]);
+      this._globals = new Map([
+        ['chartjs', 'Chart'],
+        ['mermaid', 'mermaid'],
+        ['katex', 'katex'],
+        ['codemirror', 'CodeMirror']
+      ]);
+    }
+
+    /** @param {string} name @param {string} url */
+    setUrl(name, url) { this._urls.set(name, url); }
+
+    /** @param {string} name @param {*} library */
+    provide(name, library) { this._providers.set(name, library); }
+
+    /** @param {string} name @returns {Promise<*>} */
+    load(name) {
+      if (this._loaded.has(name)) return this._loaded.get(name);
+      const promise = this._resolve(name);
+      this._loaded.set(name, promise);
+      return promise;
+    }
+
+    async _resolve(name) {
+      if (this._providers.has(name)) {
+        return this._providers.get(name);
+      }
+      const globalName = this._globals.get(name);
+      if (globalName && typeof window !== 'undefined' && window[globalName]) {
+        return window[globalName];
+      }
+      const url = this._urls.get(name);
+      if (!url) throw new Error(`No URL configured for library: ${name}`);
+      if (url.endsWith('.css')) return this._loadCSS(url);
+      return this._loadScript(url, globalName);
+    }
+
+    _loadScript(url, globalName) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = url;
+        script.async = true;
+        script.onload = () => resolve(globalName ? window[globalName] : undefined);
+        script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
+        document.head.appendChild(script);
+      });
+    }
+
+    _loadCSS(url) {
+      return new Promise((resolve, reject) => {
+        if (document.querySelector(`link[href="${url}"]`)) { resolve(); return; }
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = url;
+        link.onload = () => resolve();
+        link.onerror = () => reject(new Error(`Failed to load CSS: ${url}`));
+        document.head.appendChild(link);
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GENUI: RENDERER REGISTRY
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  class RendererRegistry {
+    constructor() {
+      this._renderers = new Map();
+      this._middleware = [];
+    }
+
+    /** @param {string} type @param {object|function} renderer @returns {function} unsubscribe */
+    register(type, renderer) {
+      if (typeof renderer === 'function') renderer = { render: renderer };
+      this._renderers.set(type, renderer);
+      return () => this._renderers.delete(type);
+    }
+
+    /** @param {string} type @returns {object|null} */
+    get(type) { return this._renderers.get(type) || null; }
+
+    /** @param {string} type @returns {boolean} */
+    has(type) { return this._renderers.has(type); }
+
+    /** @param {object} middleware @returns {function} unsubscribe */
+    use(middleware) {
+      this._middleware.push(middleware);
+      return () => {
+        const idx = this._middleware.indexOf(middleware);
+        if (idx >= 0) this._middleware.splice(idx, 1);
+      };
+    }
+
+    getMiddleware() { return this._middleware.slice(); }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GENUI: CONTAINER (DOM management)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const GENUI_CSS = `
+.kav-genui{position:absolute;inset:0;pointer-events:none;z-index:10;font-family:inherit}
+.kav-genui__board{position:absolute;inset:0;z-index:100;pointer-events:all;background:var(--kav-bg,rgba(13,13,24,0.95));display:flex;align-items:center;justify-content:center;padding:var(--kav-padding,20px);overflow:auto;flex-direction:column}
+.kav-genui__visual{position:absolute;bottom:16px;right:16px;z-index:90;pointer-events:all;background:var(--kav-bg,rgba(13,13,24,0.95));border-radius:var(--kav-radius,12px);padding:var(--kav-padding,16px);max-width:400px;max-height:60%;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,0.5)}
+.kav-genui__dismiss{position:absolute;top:8px;right:8px;background:rgba(255,255,255,0.1);border:none;color:var(--kav-text,#e0e0e8);width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:16px;z-index:10;display:flex;align-items:center;justify-content:center}
+.kav-genui__dismiss:hover{background:rgba(255,255,255,0.2)}
+.kav-genui__content{color:var(--kav-text,#e0e0e8);width:100%}
+.kav-genui__visual-table{width:100%;border-collapse:collapse;font-size:13px}
+.kav-genui__visual-table th,.kav-genui__visual-table td{padding:8px 12px;border:1px solid rgba(255,255,255,0.1);text-align:left}
+.kav-genui__visual-table th{background:rgba(255,255,255,0.05);font-weight:600}
+.kav-genui__visual-link{display:inline-block;padding:10px 20px;background:var(--kav-accent,#667eea);color:#fff;text-decoration:none;border-radius:8px;font-size:14px}
+.kav-genui__visual-link:hover{opacity:0.9}
+.kav-genui__visual-items{display:flex;flex-wrap:wrap;gap:8px}
+.kav-genui__visual-item-btn{padding:8px 16px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:var(--kav-text,#e0e0e8);border-radius:20px;cursor:pointer;font-size:13px}
+.kav-genui__visual-item-btn:hover{background:rgba(255,255,255,0.15)}
+.kav-genui__code-question{margin-bottom:12px;font-size:14px;color:var(--kav-text,#e0e0e8)}
+.kav-genui__code-submit{margin-top:12px;padding:10px 24px;background:var(--kav-accent,#667eea);border:none;color:#fff;border-radius:8px;cursor:pointer;font-size:13px}
+.kav-genui__code-submit:hover{opacity:0.9}
+.kav-genui__iframe{width:100%;height:100%;min-height:400px;border:none;border-radius:8px}
+.kav-genui__media-gallery,.kav-genui__generated-gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.kav-genui__media-item,.kav-genui__generated-item{width:100%;border-radius:8px;object-fit:cover}
+.kav-genui__visual-photo{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px}
+.kav-genui__contact{text-align:center;padding:32px;max-width:360px;margin:0 auto}
+.kav-genui__contact-label{font-size:14px;margin-bottom:16px;color:var(--kav-text,#e0e0e8)}
+.kav-genui__contact-input{width:100%;padding:12px 16px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.2);border-radius:8px;color:var(--kav-text,#e0e0e8);font-size:14px;outline:none}
+.kav-genui__contact-input:focus{border-color:var(--kav-accent,#667eea)}
+.kav-genui__contact-actions{display:flex;gap:12px;margin-top:16px;justify-content:center}
+.kav-genui__contact-submit{padding:10px 24px;background:var(--kav-accent,#667eea);border:none;color:#fff;border-radius:8px;cursor:pointer;font-size:14px}
+.kav-genui__contact-submit:disabled{opacity:0.4;cursor:not-allowed}
+.kav-genui__contact-skip{padding:10px 24px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:var(--kav-text,#e0e0e8);border-radius:8px;cursor:pointer;font-size:14px}
+.kav-genui__contact-skip:hover{background:rgba(255,255,255,0.15)}
+.kav-genui__contact-hint{font-size:11px;color:rgba(255,255,255,0.4);margin-top:12px}
+`;
+
+  class GenUIContainer {
+    constructor(config, logger) {
+      this._log = logger;
+      this._config = config;
+      this._root = null;
+      this._boardLayer = null;
+      this._visualLayer = null;
+      this._boardDismiss = null;
+      this._visualDismiss = null;
+      this._onHide = null;
+      this._keyHandler = null;
+    }
+
+    attach(parent, onHide) {
+      this._onHide = onHide;
+      this._injectCSS();
+
+      this._root = document.createElement('div');
+      this._root.className = 'kav-genui';
+      this._root.setAttribute('aria-live', 'polite');
+
+      this._boardLayer = document.createElement('div');
+      this._boardLayer.className = 'kav-genui__board';
+      this._boardLayer.setAttribute('role', 'dialog');
+      this._boardLayer.setAttribute('aria-modal', 'true');
+      this._boardLayer.style.display = 'none';
+
+      this._boardDismiss = this._createDismissBtn(() => this.hideBoard());
+      this._boardLayer.appendChild(this._boardDismiss);
+
+      this._visualLayer = document.createElement('div');
+      this._visualLayer.className = 'kav-genui__visual';
+      this._visualLayer.style.display = 'none';
+
+      this._visualDismiss = this._createDismissBtn(() => this.hideVisual());
+      this._visualLayer.appendChild(this._visualDismiss);
+
+      this._root.appendChild(this._boardLayer);
+      this._root.appendChild(this._visualLayer);
+      parent.appendChild(this._root);
+
+      this._keyHandler = (e) => {
+        if (e.key === 'Escape') {
+          if (this._boardLayer.style.display !== 'none') this.hideBoard();
+          else if (this._visualLayer.style.display !== 'none') this.hideVisual();
+        }
+      };
+      document.addEventListener('keydown', this._keyHandler);
+    }
+
+    showBoard(element) {
+      this._clearLayer(this._boardLayer);
+      this._boardLayer.appendChild(element);
+      this._boardLayer.appendChild(this._boardDismiss);
+      this._boardLayer.style.display = '';
+    }
+
+    showVisual(element) {
+      this._clearLayer(this._visualLayer);
+      this._visualLayer.appendChild(element);
+      this._visualLayer.appendChild(this._visualDismiss);
+      this._visualLayer.style.display = '';
+    }
+
+    hideBoard() {
+      if (this._boardLayer.style.display === 'none') return false;
+      this._clearLayer(this._boardLayer);
+      this._boardLayer.style.display = 'none';
+      if (this._onHide) this._onHide('board');
+      return true;
+    }
+
+    hideVisual() {
+      if (this._visualLayer.style.display === 'none') return false;
+      this._clearLayer(this._visualLayer);
+      this._visualLayer.style.display = 'none';
+      if (this._onHide) this._onHide('visual');
+      return true;
+    }
+
+    hideAll() { this.hideBoard(); this.hideVisual(); }
+
+    get isAttached() { return this._root !== null && this._root.parentNode !== null; }
+
+    detach() {
+      if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
+      if (this._root && this._root.parentNode) this._root.parentNode.removeChild(this._root);
+      this._root = null;
+    }
+
+    _clearLayer(layer) {
+      while (layer.firstChild) layer.removeChild(layer.firstChild);
+    }
+
+    _createDismissBtn(onClick) {
+      const btn = document.createElement('button');
+      btn.className = 'kav-genui__dismiss';
+      btn.setAttribute('aria-label', 'Close');
+      btn.textContent = '×';
+      btn.addEventListener('click', onClick);
+      return btn;
+    }
+
+    _injectCSS() {
+      if (document.getElementById('kav-genui-styles')) return;
+      const style = document.createElement('style');
+      style.id = 'kav-genui-styles';
+      style.textContent = GENUI_CSS;
+      document.head.appendChild(style);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GENUI: BUILT-IN RENDERERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const builtinRenderers = {
+    showHtml: {
+      render(data, container, ctx) {
+        const content = data.mediaUrl || '';
+        container.innerHTML = content;
+        container.addEventListener('click', (e) => {
+          const text = e.target.textContent || '';
+          if (text.trim()) ctx.emit('onHtmlElementClick', { htmlText: text.trim() });
+        });
+      }
+    },
+
+    showIFrame: {
+      render(data, container) {
+        const url = data.iframeUrl || data.mediaUrl;
+        if (!url) return;
+        const iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.className = 'kav-genui__iframe';
+        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+        container.appendChild(iframe);
+      }
+    },
+
+    showVisualVideo: {
+      render(data, container) {
+        const url = data.videoUrl || data.mediaUrl;
+        if (!url) return;
+        const iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.className = 'kav-genui__iframe';
+        iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
+        container.appendChild(iframe);
+      }
+    },
+
+    showVisualLink: {
+      render(data, container) {
+        const url = data.linkUrl || data.mediaUrl;
+        const text = data.linkText || url || 'Open Link';
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.className = 'kav-genui__visual-link';
+        a.textContent = text;
+        container.appendChild(a);
+      }
+    },
+
+    showVisualPhoto: {
+      render(data, container) {
+        const url = data.photoUrl || data.mediaUrl;
+        if (!url) return;
+        const img = document.createElement('img');
+        img.src = url;
+        img.className = 'kav-genui__visual-photo';
+        img.alt = 'Shared image';
+        container.appendChild(img);
+      }
+    },
+
+    showVisualItems: {
+      render(data, container, ctx) {
+        let items = data.mediaUrl;
+        if (typeof items === 'string') { try { items = JSON.parse(items); } catch (e) { items = [items]; } }
+        if (!Array.isArray(items)) items = [items];
+        const list = document.createElement('div');
+        list.className = 'kav-genui__visual-items';
+        items.forEach(item => {
+          const btn = document.createElement('button');
+          btn.className = 'kav-genui__visual-item-btn';
+          btn.textContent = String(item);
+          btn.addEventListener('click', () => ctx.emit('onHtmlElementClick', { htmlText: String(item) }));
+          list.appendChild(btn);
+        });
+        container.appendChild(list);
+      }
+    },
+
+    showVisualTable: {
+      render(data, container) {
+        let tableData = data.mediaUrl;
+        if (typeof tableData === 'string') { try { tableData = JSON.parse(tableData); } catch (e) { return; } }
+        if (!tableData || typeof tableData !== 'object') return;
+        const columns = Object.keys(tableData);
+        if (columns.length === 0) return;
+        const table = document.createElement('table');
+        table.className = 'kav-genui__visual-table';
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        columns.forEach(col => { const th = document.createElement('th'); th.textContent = col; headerRow.appendChild(th); });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        const rowCount = Math.max(...columns.map(c => Array.isArray(tableData[c]) ? tableData[c].length : 0));
+        for (let i = 0; i < rowCount; i++) {
+          const tr = document.createElement('tr');
+          columns.forEach(col => { const td = document.createElement('td'); td.textContent = Array.isArray(tableData[col]) ? (tableData[col][i] ?? '') : ''; tr.appendChild(td); });
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        container.appendChild(table);
+      }
+    },
+
+    showMedia: {
+      render(data, container) {
+        let urls = data.mediaUrl;
+        if (!Array.isArray(urls)) urls = [urls];
+        const gallery = document.createElement('div');
+        gallery.className = 'kav-genui__media-gallery';
+        urls.forEach(src => {
+          if (!src) return;
+          const img = document.createElement('img');
+          img.src = src;
+          img.className = 'kav-genui__media-item';
+          img.alt = 'Media';
+          gallery.appendChild(img);
+        });
+        container.appendChild(gallery);
+      }
+    },
+
+    showGeneratedImages: {
+      render(data, container) {
+        let urls = data.mediaUrl;
+        if (!Array.isArray(urls)) urls = [urls];
+        const gallery = document.createElement('div');
+        gallery.className = 'kav-genui__generated-gallery';
+        urls.forEach(src => {
+          if (!src) return;
+          const img = document.createElement('img');
+          img.src = src;
+          img.className = 'kav-genui__generated-item';
+          img.alt = 'Generated image';
+          gallery.appendChild(img);
+        });
+        container.appendChild(gallery);
+      }
+    },
+
+    showChart: {
+      async render(data, container, ctx) {
+        const Chart = await ctx.loader.load('chartjs');
+        let config = data.mediaUrl;
+        if (typeof config === 'string') { try { config = JSON.parse(config); } catch (e) { return; } }
+        if (!config || typeof config !== 'object') return;
+        const canvas = document.createElement('canvas');
+        canvas.style.maxWidth = '100%';
+        container.appendChild(canvas);
+        const instance = new Chart(canvas.getContext('2d'), config);
+        container._chartInstance = instance;
+      },
+      hide(container) {
+        if (container._chartInstance) { container._chartInstance.destroy(); container._chartInstance = null; }
+      }
+    },
+
+    showVisualChart: {
+      async render(data, container, ctx) {
+        return builtinRenderers.showChart.render(data, container, ctx);
+      },
+      hide(container) { builtinRenderers.showChart.hide(container); }
+    },
+
+    showDiagram: {
+      async render(data, container, ctx) {
+        const mermaid = await ctx.loader.load('mermaid');
+        mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+        const syntax = data.mediaUrl || '';
+        const id = 'kav-mermaid-' + Date.now();
+        const { svg } = await mermaid.render(id, syntax);
+        container.innerHTML = svg;
+      }
+    },
+
+    showLatex: {
+      async render(data, container, ctx) {
+        await ctx.loader.load('katex-css');
+        const katex = await ctx.loader.load('katex');
+        const formula = data.mediaUrl || '';
+        katex.render(formula, container, { throwOnError: false, displayMode: true });
+      }
+    },
+
+    showCode: {
+      async render(data, container, ctx) {
+        await ctx.loader.load('codemirror-css');
+        const CM = await ctx.loader.load('codemirror');
+        let codeData = data.mediaUrl;
+        if (typeof codeData === 'string') { try { codeData = JSON.parse(codeData); } catch (e) { codeData = { code: codeData }; } }
+        const { code, question } = codeData || {};
+        if (question) {
+          const q = document.createElement('div');
+          q.className = 'kav-genui__code-question';
+          q.textContent = question;
+          container.appendChild(q);
+        }
+        const editorEl = document.createElement('div');
+        container.appendChild(editorEl);
+        const editor = CM(editorEl, { value: code || '', lineNumbers: true, theme: 'default', mode: 'javascript' });
+        const submitBtn = document.createElement('button');
+        submitBtn.className = 'kav-genui__code-submit';
+        submitBtn.textContent = 'Submit Code';
+        submitBtn.addEventListener('click', () => ctx.emit('codeBlockComplete', { code: editor.getValue() }));
+        container.appendChild(submitBtn);
+      }
+    },
+
+    contactEmail: {
+      render(data, container, ctx) {
+        container.innerHTML = `
+          <div class="kav-genui__contact">
+            <label class="kav-genui__contact-label" for="kav-contact-email">Please enter your email address</label>
+            <input type="email" id="kav-contact-email" class="kav-genui__contact-input" placeholder="Your Email Address" autocomplete="email">
+            <div class="kav-genui__contact-actions">
+              <button class="kav-genui__contact-submit" disabled>Submit</button>
+              <button class="kav-genui__contact-skip">Skip</button>
+            </div>
+            <p class="kav-genui__contact-hint">The avatar is not listening during input</p>
+          </div>`;
+        const input = container.querySelector('.kav-genui__contact-input');
+        const submit = container.querySelector('.kav-genui__contact-submit');
+        const skip = container.querySelector('.kav-genui__contact-skip');
+        input.addEventListener('input', () => { submit.disabled = !CONTACT_VALIDATION.email.test(input.value); });
+        submit.addEventListener('click', () => {
+          ctx.emit('contactInfoReceived', { contact_info: { info_type: 'email', info_value: input.value } });
+          ctx.hideGenUI();
+        });
+        skip.addEventListener('click', () => {
+          ctx.emit('contactInfoRejected', { type: 'email' });
+          ctx.hideGenUI();
+        });
+        setTimeout(() => input.focus(), 50);
+      }
+    },
+
+    contactPhone: {
+      render(data, container, ctx) {
+        container.innerHTML = `
+          <div class="kav-genui__contact">
+            <label class="kav-genui__contact-label" for="kav-contact-phone">Please enter your phone number</label>
+            <input type="tel" id="kav-contact-phone" class="kav-genui__contact-input" placeholder="Your Phone Number" autocomplete="tel">
+            <div class="kav-genui__contact-actions">
+              <button class="kav-genui__contact-submit" disabled>Submit</button>
+              <button class="kav-genui__contact-skip">Skip</button>
+            </div>
+            <p class="kav-genui__contact-hint">The avatar is not listening during input</p>
+          </div>`;
+        const input = container.querySelector('.kav-genui__contact-input');
+        const submit = container.querySelector('.kav-genui__contact-submit');
+        const skip = container.querySelector('.kav-genui__contact-skip');
+        input.addEventListener('input', () => { submit.disabled = !CONTACT_VALIDATION.phone.test(input.value.replace(/\D/g, '')); });
+        submit.addEventListener('click', () => {
+          ctx.emit('contactInfoReceived', { contact_info: { info_type: 'phone', info_value: input.value } });
+          ctx.hideGenUI();
+        });
+        skip.addEventListener('click', () => {
+          ctx.emit('contactInfoRejected', { type: 'phone' });
+          ctx.hideGenUI();
+        });
+        setTimeout(() => input.focus(), 50);
+      }
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GENUI: MANAGER (orchestrator)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  class GenUIManager {
+    constructor(emitter, config, logger) {
+      this._emitter = emitter;
+      this._log = logger;
+      this._config = config || {};
+      this._enabled = this._config.enabled !== false;
+      this._socket = null;
+
+      this._container = new GenUIContainer(this._config, logger);
+      this._registry = new RendererRegistry();
+      this._loader = new LibraryLoader(logger);
+
+      this._activeType = null;
+      this._activeCategory = null;
+
+      if (this._config.libraries) {
+        Object.entries(this._config.libraries).forEach(([name, lib]) => { if (lib) this._loader.provide(name, lib); });
+      }
+      if (this._config.renderers) {
+        Object.entries(this._config.renderers).forEach(([type, r]) => { if (r) this._registry.register(type, r); });
+      }
+
+      this._registerBuiltins();
+    }
+
+    attach(parent) {
+      if (!this._enabled || !parent) return;
+      this._container.attach(parent, (category) => {
+        this._emitter.emit(Events.GENUI_HIDDEN, { type: this._activeType, category });
+        this._activeType = null;
+        this._activeCategory = null;
+      });
+    }
+
+    bindSocket(socket) {
+      this._socket = socket;
+      GENUI_EVENTS.forEach(evt => { socket.on(evt, (data) => this._handleShow(evt, data)); });
+      GENUI_HIDE_EVENTS.forEach(evt => { socket.on(evt, () => this._handleHide(evt)); });
+      socket.on('contactCollector', (data) => {
+        const contactType = (data?.contact_type || 'email').toLowerCase();
+        const type = 'contact' + contactType.charAt(0).toUpperCase() + contactType.slice(1);
+        this._handleShow(type, { contact_type: contactType });
+      });
+    }
+
+    async _handleShow(type, data) {
+      const category = BOARD_TYPES.has(type) ? GENUI_CATEGORY.BOARD : GENUI_CATEGORY.VISUAL;
+      const context = { type, data, category, cancelled: false };
+
+      for (const mw of this._registry.getMiddleware()) {
+        if (mw.beforeRender) {
+          try { await mw.beforeRender(context); } catch (e) { this._log.warn('Middleware error', e.message); }
+          if (context.cancelled) { this._log.debug('GenUI render cancelled by middleware', type); break; }
+        }
+      }
+
+      this._emitter.emit(Events.GENUI_BEFORE_RENDER, { type, data: context.data, category });
+      this._emitter.emit(Events.GENUI, { type, data });
+
+      if (context.cancelled || !this._enabled || !this._container.isAttached) return;
+
+      const renderer = this._registry.get(type);
+      if (!renderer) { this._log.debug('No renderer for type', type); return; }
+
+      const renderTarget = document.createElement('div');
+      renderTarget.className = 'kav-genui__content kav-genui__content--' + type;
+      renderTarget.dataset.genuiType = type;
+
+      const self = this;
+      const renderContext = {
+        loader: this._loader,
+        type,
+        category,
+        emit(event, payload) {
+          if (self._socket) self._socket.emit(event, payload);
+          self._emitter.emit(Events.GENUI_INTERACTION, { interactionType: event, payload });
+        },
+        hideGenUI() { self.hide(category); }
+      };
+
+      try {
+        await renderer.render(context.data, renderTarget, renderContext);
+        if (category === GENUI_CATEGORY.BOARD) this._container.showBoard(renderTarget);
+        else this._container.showVisual(renderTarget);
+
+        this._activeType = type;
+        this._activeCategory = category;
+
+        for (const mw of this._registry.getMiddleware()) {
+          if (mw.afterRender) {
+            try { await mw.afterRender({ type, data: context.data, category, element: renderTarget }); } catch (e) { /* ignore */ }
+          }
+        }
+        this._emitter.emit(Events.GENUI_RENDERED, { type, data: context.data, category, element: renderTarget });
+      } catch (err) {
+        this._log.error('GenUI render error [' + type + ']:', err.message);
+        this._emitter.emit(Events.GENUI_ERROR, { type, error: err });
+      }
+    }
+
+    _handleHide(evt) {
+      const target = HIDE_EVENT_MAP[evt];
+      if (target === 'visual') this._container.hideVisual();
+      else if (target === 'board') this._container.hideBoard();
+      else this._container.hideAll();
+    }
+
+    hide(category) {
+      if (!category) this._container.hideAll();
+      else if (category === 'board') this._container.hideBoard();
+      else if (category === 'visual') this._container.hideVisual();
+    }
+
+    registerRenderer(type, renderer) { return this._registry.register(type, renderer); }
+    use(middleware) { return this._registry.use(middleware); }
+    provideLibrary(name, lib) { this._loader.provide(name, lib); }
+    setLibraryUrl(name, url) { this._loader.setUrl(name, url); }
+    getActiveType() { return this._activeType ? { type: this._activeType, category: this._activeCategory } : null; }
+    setEnabled(enabled) { this._enabled = enabled; }
+    isEnabled() { return this._enabled; }
+
+    destroy() {
+      this._container.detach();
+      this._socket = null;
+    }
+
+    _registerBuiltins() {
+      Object.entries(builtinRenderers).forEach(([type, renderer]) => {
+        if (!this._registry.has(type)) this._registry.register(type, renderer);
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // MAIN SDK CLASS
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -993,7 +1692,17 @@
           ariaLabel: config.media?.ariaLabel || 'AI Avatar Video'
         }),
         transcriptEnabled: config.transcriptEnabled !== false,
-        peerName: config.peerName || DEFAULTS.PEER_NAME
+        peerName: config.peerName || DEFAULTS.PEER_NAME,
+        genui: Object.freeze({
+          enabled: config.genui?.enabled !== false,
+          container: config.genui?.container || null,
+          position: config.genui?.position || 'overlay',
+          autoHide: config.genui?.autoHide !== false,
+          dismissible: config.genui?.dismissible !== false,
+          cssPrefix: config.genui?.cssPrefix || 'kav-genui',
+          libraries: config.genui?.libraries || {},
+          renderers: config.genui?.renderers || {}
+        })
       });
 
       this._log = new Logger('KalturaAvatar', this._config.debug);
@@ -1011,6 +1720,7 @@
       this._whep = new WHEPClient(this._config, this._log);
       this._asr = new ASRConnection(this._config, this._log);
       this._audioFallback = new AudioFallback(this._config, this._log);
+      this._genui = new GenUIManager(this._emitter, this._config.genui, this._log);
 
       this._socket = null;
       this._sessionId = null;
@@ -1081,6 +1791,7 @@
     destroy() {
       this._reconnect.cancel();
       this._dpp.cancelDebounce();
+      this._genui.destroy();
       this._cleanupConnection();
       this._cleanupMedia();
       this._removeVideoElement();
@@ -1206,6 +1917,39 @@
     muteMic() { this._mic.mute(); }
     unmuteMic() { this._mic.unmute(); }
     isMicMuted() { return this._mic.muted; }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GENUI
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** @param {string} type - GenUI type (e.g. 'showChart', 'contactEmail') */
+    /** @param {{ render: Function, hide?: Function }|Function} renderer */
+    /** @returns {Function} unsubscribe */
+    registerRenderer(type, renderer) { return this._genui.registerRenderer(type, renderer); }
+
+    /** @param {{ beforeRender?: Function, afterRender?: Function }} middleware */
+    /** @returns {Function} unsubscribe */
+    useGenUIMiddleware(middleware) { return this._genui.use(middleware); }
+
+    /** @param {string} name - Library name (e.g. 'chartjs', 'mermaid', 'katex', 'codemirror') */
+    /** @param {*} library - The library instance */
+    provideLibrary(name, library) { this._genui.provideLibrary(name, library); }
+
+    /** @param {string} name - Library name */
+    /** @param {string} url - CDN URL */
+    setLibraryUrl(name, url) { this._genui.setLibraryUrl(name, url); }
+
+    /** @param {string} [category] - 'board', 'visual', or omit for all */
+    hideGenUI(category) { this._genui.hide(category); }
+
+    /** @returns {{ type: string, category: string }|null} */
+    getActiveGenUI() { return this._genui.getActiveType(); }
+
+    /** @param {boolean} enabled */
+    setGenUIEnabled(enabled) { this._genui.setEnabled(enabled); }
+
+    /** @returns {boolean} */
+    isGenUIEnabled() { return this._genui.isEnabled(); }
 
     // ─────────────────────────────────────────────────────────────────────────
     // INTERNAL: SOCKET INITIALIZATION
@@ -1376,19 +2120,8 @@
           }
         });
 
-        // Contact collection (server pauses listening until responded)
-        this._socket.on('contactCollector', (data) => {
-          const type = data?.contact_type?.toLowerCase() || 'email';
-          this._log.debug('Contact collection requested', type);
-          this._emitter.emit(Events.CONTACT_COLLECTION, { type });
-        });
-
-        // GenUI events
-        GENUI_EVENTS.forEach(evt => {
-          this._socket.on(evt, (data) => {
-            this._emitter.emit(Events.GENUI, { type: evt, data });
-          });
-        });
+        // GenUI + contact collection (handled by GenUIManager)
+        this._genui.bindSocket(this._socket);
 
         // Error events
         this._socket.on('stvTaskFail', (data) => {
@@ -1521,6 +2254,13 @@
       this._videoElement = this._config.media.videoElement || this._createVideoElement(container);
       this._audioElement = this._config.media.audioElement || this._createAudioElement();
       container.appendChild(this._videoElement);
+
+      const genuiTarget = this._config.genui.container
+        ? (typeof this._config.genui.container === 'string'
+          ? document.querySelector(this._config.genui.container)
+          : this._config.genui.container)
+        : container;
+      this._genui.attach(genuiTarget);
     }
 
     _createVideoElement(container) {
@@ -1581,7 +2321,7 @@
 
   // Expose internals for advanced use and testing
   KalturaAvatarSDK.AvatarError = AvatarError;
-  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger };
+  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader };
 
   return KalturaAvatarSDK;
 }));

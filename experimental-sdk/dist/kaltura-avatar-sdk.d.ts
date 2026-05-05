@@ -30,6 +30,8 @@ export interface AvatarConfig {
   transcriptEnabled?: boolean;
   /** Display name sent to server (default: 'SDKUser') */
   peerName?: string;
+  /** GenUI rendering configuration */
+  genui?: Partial<GenUIConfig>;
 }
 
 export interface EndpointConfig {
@@ -109,6 +111,92 @@ export interface GenUIPayload {
   data: unknown;
 }
 
+export interface GenUIConfig {
+  /** Enable automatic rendering (default: true). When false, events still fire. */
+  enabled: boolean;
+  /** Separate container for GenUI content (default: overlay on video container) */
+  container: string | HTMLElement | null;
+  /** Positioning mode: 'overlay' | 'below' | 'custom' (default: 'overlay') */
+  position: 'overlay' | 'below' | 'custom';
+  /** Auto-hide previous content when new arrives (default: true) */
+  autoHide: boolean;
+  /** Show dismiss/close button (default: true) */
+  dismissible: boolean;
+  /** BEM CSS class prefix (default: 'kav-genui') */
+  cssPrefix: string;
+  /** Pre-provide library instances to avoid CDN loads */
+  libraries: Record<string, unknown>;
+  /** Pre-register custom renderers by type */
+  renderers: Record<string, GenUIRenderer>;
+}
+
+export interface GenUIRenderer {
+  /** Render the GenUI content into the provided container element */
+  render(data: unknown, container: HTMLElement, context: GenUIRenderContext): void | Promise<void>;
+  /** Optional cleanup when content is hidden */
+  hide?(container: HTMLElement): void;
+}
+
+export interface GenUIRenderContext {
+  /** Lazy library loader */
+  loader: {
+    load(name: string): Promise<unknown>;
+    provide(name: string, lib: unknown): void;
+    setUrl(name: string, url: string): void;
+  };
+  /** The GenUI type being rendered (e.g. 'showChart') */
+  type: string;
+  /** Category: 'board' (full-screen) or 'visual' (overlay panel) */
+  category: 'board' | 'visual';
+  /** Emit an event to the server socket and fire genui:interaction locally */
+  emit(event: string, payload?: unknown): void;
+  /** Hide the current GenUI content */
+  hideGenUI(): void;
+}
+
+export interface GenUIMiddleware {
+  /** Called before rendering. Set ctx.cancelled = true to prevent rendering. */
+  beforeRender?(ctx: GenUIMiddlewareContext): void | Promise<void>;
+  /** Called after rendering completes. */
+  afterRender?(ctx: GenUIAfterRenderContext): void | Promise<void>;
+}
+
+export interface GenUIMiddlewareContext {
+  type: string;
+  data: unknown;
+  category: 'board' | 'visual';
+  cancelled: boolean;
+}
+
+export interface GenUIAfterRenderContext {
+  type: string;
+  data: unknown;
+  category: 'board' | 'visual';
+  element: HTMLElement;
+}
+
+export interface GenUIRenderedPayload {
+  type: string;
+  data: unknown;
+  category: 'board' | 'visual';
+  element: HTMLElement;
+}
+
+export interface GenUIHiddenPayload {
+  type: string | null;
+  category: 'board' | 'visual';
+}
+
+export interface GenUIInteractionPayload {
+  interactionType: string;
+  payload: unknown;
+}
+
+export interface GenUIErrorPayload {
+  type: string;
+  error: Error;
+}
+
 export interface ReconnectingPayload {
   attempt: number;
   maxAttempts: number;
@@ -146,6 +234,11 @@ export interface AvatarEventMap {
   'mic-denied': { error: Error };
 
   'genui': GenUIPayload;
+  'genui:before-render': { type: string; data: unknown; category: 'board' | 'visual' };
+  'genui:rendered': GenUIRenderedPayload;
+  'genui:hidden': GenUIHiddenPayload;
+  'genui:interaction': GenUIInteractionPayload;
+  'genui:error': GenUIErrorPayload;
   'command-matched': CommandMatch;
   'transcript-entry': TranscriptEntry;
 
@@ -240,6 +333,30 @@ export declare class KalturaAvatarSDK {
   muteMic(): void;
   unmuteMic(): void;
   isMicMuted(): boolean;
+
+  // ── GenUI Rendering ──
+  /** Register or override a renderer for a GenUI type */
+  registerRenderer(type: string, renderer: GenUIRenderer | ((data: unknown, container: HTMLElement, ctx: GenUIRenderContext) => void | Promise<void>)): () => void;
+  /** Add middleware hooks (before/after render) */
+  useGenUIMiddleware(middleware: GenUIMiddleware): () => void;
+  /** Provide a library instance to avoid CDN loading */
+  provideLibrary(name: string, library: unknown): void;
+  /** Override the CDN URL for a library */
+  setLibraryUrl(name: string, url: string): void;
+  /** Hide currently active GenUI content */
+  hideGenUI(category?: 'board' | 'visual'): void;
+  /** Get the currently active GenUI type and category */
+  getActiveGenUI(): { type: string; category: 'board' | 'visual' } | null;
+  /** Enable or disable GenUI rendering (events still fire when disabled) */
+  setGenUIEnabled(enabled: boolean): void;
+  /** Check if GenUI rendering is enabled */
+  isGenUIEnabled(): boolean;
+
+  // ── Contact Collection (convenience) ──
+  /** Submit contact info to server (convenience method for custom contact forms) */
+  submitContact(type: 'email' | 'phone', value: string): void;
+  /** Reject contact collection request */
+  rejectContact(type: 'email' | 'phone'): void;
 }
 
 declare const AvatarEvents: {
@@ -259,6 +376,11 @@ declare const AvatarEvents: {
   readonly MIC_GRANTED: 'mic-granted';
   readonly MIC_DENIED: 'mic-denied';
   readonly GENUI: 'genui';
+  readonly GENUI_BEFORE_RENDER: 'genui:before-render';
+  readonly GENUI_RENDERED: 'genui:rendered';
+  readonly GENUI_HIDDEN: 'genui:hidden';
+  readonly GENUI_INTERACTION: 'genui:interaction';
+  readonly GENUI_ERROR: 'genui:error';
   readonly COMMAND_MATCHED: 'command-matched';
   readonly TRANSCRIPT_ENTRY: 'transcript-entry';
   readonly RECONNECTING: 'reconnecting';

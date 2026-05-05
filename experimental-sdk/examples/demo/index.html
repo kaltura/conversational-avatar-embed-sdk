@@ -215,14 +215,12 @@ function doConnect() {
         addServerEvent(type, data);
     });
 
-    sdk.on(KalturaAvatarSDK.Events.CONTACT_COLLECTION, ({ type }) => {
-        logEvent('contact', `Contact collection requested: ${type}`);
-        const value = prompt(`The avatar is asking for your ${type}. Enter it or cancel to skip:`);
-        if (value) {
-            sdk.submitContact(type, value);
-        } else {
-            sdk.rejectContact(type);
-        }
+    sdk.on(KalturaAvatarSDK.Events.GENUI_RENDERED, ({ type, category }) => {
+        logEvent('genui', `Rendered: ${type} (${category})`);
+    });
+
+    sdk.on(KalturaAvatarSDK.Events.GENUI_INTERACTION, ({ interactionType, payload }) => {
+        logEvent('genui', `Interaction: ${interactionType}`);
     });
 
     // Start connection
