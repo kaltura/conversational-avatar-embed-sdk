@@ -27,3 +27,7 @@ __pycache__/
 # Playwright
 test-results/
 playwright-report/
+
+# Screenshots (dev-only, not committed)
+*.png
+!sdk/images/*.png

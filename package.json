@@ -1,26 +1,34 @@
 {
   "name": "conversational-avatar-embed-sdk",
-  "version": "1.3.0",
-  "description": "Kaltura Conversational Avatar Embed SDK - Embed AI avatar conversations in any website",
+  "version": "2.0.0",
+  "description": "Kaltura Avatar SDK — Embed AI avatar conversations in any website",
   "main": "sdk/kaltura-avatar-sdk.js",
   "scripts": {
-    "test": "npm run test:hr && npm run test:code",
-    "test:hr": "node examples/hr_avatar/test-e2e.js",
-    "test:code": "node examples/code_interview/test-e2e.js",
-    "test:install": "npx playwright install chromium"
+    "test": "npm run test:v1 && npm run test:v2",
+    "test:v1": "node examples/hr_avatar/test-e2e.js && node examples/code_interview/test-e2e.js",
+    "test:v2": "cd sdk-v2 && npm test",
+    "test:v2:live": "cd sdk-v2 && npm run test:live",
+    "test:install": "npx playwright install chromium",
+    "demo": "python3 -m http.server 8080"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kaltura/conversational-avatar-embed-sdk.git"
   },
   "keywords": [
+    "kaltura",
     "avatar",
     "ai",
-    "kaltura",
     "sdk",
-    "conversation"
+    "conversational-ai",
+    "webrtc",
+    "embed",
+    "video-chat",
+    "real-time",
+    "genui",
+    "interactive"
   ],
-  "author": "Zohar Babin",
+  "author": "Kaltura",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/kaltura/conversational-avatar-embed-sdk/issues"

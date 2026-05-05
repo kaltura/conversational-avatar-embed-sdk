@@ -7,7 +7,7 @@
     <!-- Socket.IO (peer dependency) -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <!-- SDK: use relative path for local dev, or the CDN URL in production:
-         https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/experimental-sdk/dist/kaltura-avatar-sdk.js -->
+         https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-v2/dist/kaltura-avatar-sdk.js -->
     <script src="../../dist/kaltura-avatar-sdk.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -32,8 +32,9 @@
         main { flex: 1; display: grid; grid-template-columns: 1fr 380px; min-height: 0; overflow: hidden; }
 
         .video-section { display: flex; flex-direction: column; background: #000; min-height: 0; }
-        .video-wrapper { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; position: relative; }
-        .video-wrapper video { width: 100%; height: 100%; object-fit: contain; }
+        .video-wrapper { flex: 1; display: flex; align-items: stretch; min-height: 0; position: relative; }
+        #avatar-container { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; }
+        #avatar-container video { width: 100%; height: 100%; object-fit: contain; transition: all 0.4s ease; }
         .status-badge { position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); padding: 6px 12px; border-radius: 8px; font-size: 11px; font-family: 'SF Mono', monospace; display: flex; gap: 12px; }
         .status-badge .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
         .status-badge .dot.green { background: #4ade80; }
@@ -211,7 +212,7 @@ function doConnect() {
     });
 
     sdk.on(KalturaAvatarSDK.Events.GENUI, ({ type, data }) => {
-        logEvent('genui', `${type}: ${JSON.stringify(data).substring(0, 80)}`);
+        logEvent('genui', `${type}: ${JSON.stringify(data)}`);
         addServerEvent(type, data);
     });
 
@@ -301,7 +302,7 @@ function logEvent(type, text, data) {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     let detail = '';
     if (data && typeof data === 'object') {
-        try { detail = JSON.stringify(data).substring(0, 120); } catch(e) {}
+        try { detail = JSON.stringify(data); } catch(e) {}
     }
     entry.innerHTML = `<span class="time">${time}</span><span class="name">${escapeHtml(text)}</span>${detail ? `<span class="detail">${escapeHtml(detail)}</span>` : ''}`;
     log.appendChild(entry);
@@ -324,7 +325,7 @@ function addServerEvent(type, data) {
     const entry = document.createElement('div');
     entry.className = 'log-entry';
     const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const detail = data ? JSON.stringify(data).substring(0, 200) : '';
+    const detail = data ? JSON.stringify(data) : '';
     entry.innerHTML = `<span class="time">${time}</span><span class="name">${escapeHtml(type)}</span>${detail ? `<span class="detail">${escapeHtml(detail)}</span>` : ''}`;
     log.appendChild(entry);
     log.scrollTop = log.scrollHeight;

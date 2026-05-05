@@ -1,12 +1,12 @@
-# Kaltura Avatar Embed SDK — Experimental (Direct Connection)
+# Kaltura Avatar SDK v2 — Direct Connection
 
-> **Status: Experimental** — This SDK connects directly to the Kaltura Avatar server via Socket.IO and WebRTC, bypassing the iframe. It gives you full control over the video element, events, and communication.
+The recommended SDK for embedding Kaltura AI Avatars. Connects directly to the avatar server via Socket.IO + WebRTC — no iframe required. Full control over video, audio, events, and rich visual content.
 
 ---
 
-## What This Does
+## Why v2?
 
-The standard Kaltura Avatar SDK embeds the avatar inside a hidden `<iframe>`. This experimental version removes the iframe entirely — your page connects directly to the avatar server. This means:
+Compared to the iframe-based v1, this SDK gives you:
 
 - **You own the `<video>` element** — style it, position it, overlay it however you want
 - **Lower latency** — no extra iframe message-passing layer
@@ -25,7 +25,7 @@ The standard Kaltura Avatar SDK embeds the avatar inside a hidden `<iframe>`. Th
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
 <!-- The SDK -->
-<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/experimental-sdk/dist/kaltura-avatar-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-v2/dist/kaltura-avatar-sdk.js"></script>
 ```
 
 ### Step 2: Add a container for the avatar video
@@ -80,7 +80,7 @@ That's it. The avatar video will render, the microphone will be requested, and t
   <button onclick="send()">Send</button>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/experimental-sdk/dist/kaltura-avatar-sdk.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-v2/dist/kaltura-avatar-sdk.js"></script>
   <script>
     const sdk = new KalturaAvatarSDK({
       clientId: 'YOUR_CLIENT_ID',
@@ -581,12 +581,12 @@ await Promise.all([coach.connect(), expert.connect()]);
 Load directly from GitHub via jsDelivr (no npm install needed):
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/experimental-sdk/dist/kaltura-avatar-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-v2/dist/kaltura-avatar-sdk.js"></script>
 ```
 
 Pin to a specific version:
 ```html
-<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@v2.0.0-experimental.1/experimental-sdk/dist/kaltura-avatar-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@v2.0.0/sdk-v2/dist/kaltura-avatar-sdk.js"></script>
 ```
 
 ---
@@ -602,11 +602,11 @@ Requires: WebRTC, getUserMedia, fetch API
 ## Running Tests
 
 ```bash
-cd experimental-sdk
+cd sdk-v2
 npm install
-npm test           # Unit tests (41 tests, runs in ~1 second)
-npm run test:live  # Live integration tests (connects to real server, ~1 minute)
-npm run test:all   # Both
+npm test           # Unit + GenUI tests (125 tests, runs in ~2 seconds)
+npm run test:live  # Live integration tests (connects to real server)
+npm run test:all   # All tests
 ```
 
 ---

@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.0.0-experimental.1
+ * @version 2.0.0
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.0.0-experimental.1';
+  const VERSION = '2.0.0';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -136,6 +136,18 @@
   const BOARD_TYPES = new Set([
     'showLatex', 'showChart', 'showHtml', 'showDiagram', 'showCode', 'showIFrame',
     'contactEmail', 'contactPhone'
+  ]);
+
+  // Types that ignore server-sent hide events (e.g. hideVisuals).
+  // Sticky content is only dismissed by: user clicking close, a new show* event replacing it,
+  // or the developer calling sdk.hideGenUI(). This prevents content from being closed prematurely
+  // when the server reacts to user speech during playback.
+  // All GenUI types are sticky by default EXCEPT contact collection (which requires server handshake).
+  const DEFAULT_STICKY_TYPES = new Set([
+    'showMedia', 'showHtml', 'showCode', 'showDiagram', 'showChart',
+    'showIFrame', 'showLatex', 'showGeneratedImages', 'showVisualChart',
+    'showVisualItems', 'showVisualLink', 'showVisualPhoto',
+    'showVisualTable', 'showVisualVideo'
   ]);
 
   const GENUI_HIDE_EVENTS = [
@@ -1114,23 +1126,26 @@
   const GENUI_CSS = `
 .kav-genui{position:absolute;inset:0;pointer-events:none;z-index:10;font-family:inherit}
 .kav-genui__board{position:absolute;inset:0;z-index:100;pointer-events:all;background:var(--kav-bg,rgba(13,13,24,0.95));display:flex;align-items:center;justify-content:center;padding:var(--kav-padding,20px);overflow:auto;flex-direction:column}
-.kav-genui__visual{position:absolute;bottom:16px;right:16px;z-index:90;pointer-events:all;background:var(--kav-bg,rgba(13,13,24,0.95));border-radius:var(--kav-radius,12px);padding:var(--kav-padding,16px);max-width:400px;max-height:60%;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,0.5)}
-.kav-genui__dismiss{position:absolute;top:8px;right:8px;background:rgba(255,255,255,0.1);border:none;color:var(--kav-text,#e0e0e8);width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:16px;z-index:10;display:flex;align-items:center;justify-content:center}
-.kav-genui__dismiss:hover{background:rgba(255,255,255,0.2)}
-.kav-genui__content{color:var(--kav-text,#e0e0e8);width:100%}
-.kav-genui__visual-table{width:100%;border-collapse:collapse;font-size:13px}
-.kav-genui__visual-table th,.kav-genui__visual-table td{padding:8px 12px;border:1px solid rgba(255,255,255,0.1);text-align:left}
-.kav-genui__visual-table th{background:rgba(255,255,255,0.05);font-weight:600}
-.kav-genui__visual-link{display:inline-block;padding:10px 20px;background:var(--kav-accent,#667eea);color:#fff;text-decoration:none;border-radius:8px;font-size:14px}
-.kav-genui__visual-link:hover{opacity:0.9}
-.kav-genui__visual-items{display:flex;flex-wrap:wrap;gap:8px}
-.kav-genui__visual-item-btn{padding:8px 16px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:var(--kav-text,#e0e0e8);border-radius:20px;cursor:pointer;font-size:13px}
-.kav-genui__visual-item-btn:hover{background:rgba(255,255,255,0.15)}
+.kav-genui__visual{position:absolute;inset:0;z-index:90;pointer-events:all;display:flex;align-items:stretch;opacity:0;transform:translateX(-20px);transition:opacity 0.4s ease,transform 0.4s ease}
+.kav-genui__visual--active{opacity:1;transform:translateX(0)}
+.kav-genui__visual-content{flex:1;background:var(--kav-bg,rgba(13,13,24,0.97));padding:var(--kav-padding,24px);overflow:auto;display:flex;align-items:center;justify-content:center;min-width:0}
+.kav-genui__visual-pip{width:280px;min-width:280px;display:flex;align-items:flex-end;justify-content:center;padding:12px;background:rgba(0,0,0,0.4)}
+.kav-genui__dismiss{position:absolute;top:12px;right:12px;background:rgba(255,255,255,0.1);backdrop-filter:blur(4px);border:none;color:var(--kav-text,#e0e0e8);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:18px;z-index:10;display:flex;align-items:center;justify-content:center;transition:background 0.2s}
+.kav-genui__dismiss:hover{background:rgba(255,255,255,0.25)}
+.kav-genui__content{color:var(--kav-text,#e0e0e8);width:100%;max-width:700px}
+.kav-genui__visual-table{width:100%;border-collapse:collapse;font-size:14px}
+.kav-genui__visual-table th,.kav-genui__visual-table td{padding:10px 14px;border:1px solid rgba(255,255,255,0.1);text-align:left}
+.kav-genui__visual-table th{background:rgba(255,255,255,0.05);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.5px}
+.kav-genui__visual-link{display:inline-block;padding:12px 24px;background:var(--kav-accent,#667eea);color:#fff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:500;transition:opacity 0.2s}
+.kav-genui__visual-link:hover{opacity:0.85}
+.kav-genui__visual-items{display:flex;flex-wrap:wrap;gap:10px}
+.kav-genui__visual-item-btn{padding:10px 20px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:var(--kav-text,#e0e0e8);border-radius:24px;cursor:pointer;font-size:14px;transition:background 0.2s,border-color 0.2s}
+.kav-genui__visual-item-btn:hover{background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.3)}
 .kav-genui__code-question{margin-bottom:12px;font-size:14px;color:var(--kav-text,#e0e0e8)}
 .kav-genui__code-submit{margin-top:12px;padding:10px 24px;background:var(--kav-accent,#667eea);border:none;color:#fff;border-radius:8px;cursor:pointer;font-size:13px}
 .kav-genui__code-submit:hover{opacity:0.9}
 .kav-genui__iframe{width:100%;height:100%;min-height:400px;border:none;border-radius:8px}
-.kav-genui__media-gallery,.kav-genui__generated-gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.kav-genui__media-gallery,.kav-genui__generated-gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
 .kav-genui__media-item,.kav-genui__generated-item{width:100%;border-radius:8px;object-fit:cover}
 .kav-genui__visual-photo{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px}
 .kav-genui__contact{text-align:center;padding:32px;max-width:360px;margin:0 auto}
@@ -1152,14 +1167,19 @@
       this._root = null;
       this._boardLayer = null;
       this._visualLayer = null;
+      this._visualContent = null;
+      this._visualPip = null;
       this._boardDismiss = null;
       this._visualDismiss = null;
       this._onHide = null;
       this._keyHandler = null;
+      this._parent = null;
+      this._videoEl = null;
     }
 
     attach(parent, onHide) {
       this._onHide = onHide;
+      this._parent = parent;
       this._injectCSS();
 
       this._root = document.createElement('div');
@@ -1179,7 +1199,16 @@
       this._visualLayer.className = 'kav-genui__visual';
       this._visualLayer.style.display = 'none';
 
+      this._visualContent = document.createElement('div');
+      this._visualContent.className = 'kav-genui__visual-content';
+
+      this._visualPip = document.createElement('div');
+      this._visualPip.className = 'kav-genui__visual-pip';
+
       this._visualDismiss = this._createDismissBtn(() => this.hideVisual());
+
+      this._visualLayer.appendChild(this._visualContent);
+      this._visualLayer.appendChild(this._visualPip);
       this._visualLayer.appendChild(this._visualDismiss);
 
       this._root.appendChild(this._boardLayer);
@@ -1203,10 +1232,13 @@
     }
 
     showVisual(element) {
-      this._clearLayer(this._visualLayer);
-      this._visualLayer.appendChild(element);
-      this._visualLayer.appendChild(this._visualDismiss);
+      this._visualContent.innerHTML = '';
+      this._visualContent.appendChild(element);
+      this._moveVideoToPip();
       this._visualLayer.style.display = '';
+      requestAnimationFrame(() => {
+        this._visualLayer.classList.add('kav-genui__visual--active');
+      });
     }
 
     hideBoard() {
@@ -1219,7 +1251,9 @@
 
     hideVisual() {
       if (this._visualLayer.style.display === 'none') return false;
-      this._clearLayer(this._visualLayer);
+      this._visualLayer.classList.remove('kav-genui__visual--active');
+      this._restoreVideo();
+      this._visualContent.innerHTML = '';
       this._visualLayer.style.display = 'none';
       if (this._onHide) this._onHide('visual');
       return true;
@@ -1227,9 +1261,45 @@
 
     hideAll() { this.hideBoard(); this.hideVisual(); }
 
+    _moveVideoToPip() {
+      if (!this._parent) return;
+      this._videoEl = this._parent.querySelector('video');
+      if (this._videoEl) {
+        this._videoEl._origStyles = {
+          width: this._videoEl.style.width,
+          height: this._videoEl.style.height,
+          borderRadius: this._videoEl.style.borderRadius,
+          transition: this._videoEl.style.transition,
+          objectFit: this._videoEl.style.objectFit
+        };
+        this._videoEl.style.transition = 'all 0.4s ease';
+        this._videoEl.style.width = '100%';
+        this._videoEl.style.height = 'auto';
+        this._videoEl.style.maxHeight = '240px';
+        this._videoEl.style.borderRadius = '12px';
+        this._videoEl.style.objectFit = 'cover';
+        this._visualPip.appendChild(this._videoEl);
+      }
+    }
+
+    _restoreVideo() {
+      if (this._videoEl && this._parent) {
+        const orig = this._videoEl._origStyles || {};
+        this._videoEl.style.transition = 'all 0.4s ease';
+        this._videoEl.style.width = orig.width || '';
+        this._videoEl.style.height = orig.height || '';
+        this._videoEl.style.maxHeight = '';
+        this._videoEl.style.borderRadius = orig.borderRadius || '';
+        this._videoEl.style.objectFit = orig.objectFit || '';
+        this._parent.insertBefore(this._videoEl, this._parent.firstChild);
+        this._videoEl = null;
+      }
+    }
+
     get isAttached() { return this._root !== null && this._root.parentNode !== null; }
 
     detach() {
+      this._restoreVideo();
       if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
       if (this._root && this._root.parentNode) this._root.parentNode.removeChild(this._root);
       this._root = null;
@@ -1288,11 +1358,14 @@
     showVisualVideo: {
       render(data, container) {
         const url = data.videoUrl || data.mediaUrl;
-        if (!url) return;
+        if (!url || typeof url !== 'string') return;
+        try { const u = new URL(url); if (!u.protocol.startsWith('http')) return; } catch (e) { return; }
         const iframe = document.createElement('iframe');
         iframe.src = url;
         iframe.className = 'kav-genui__iframe';
-        iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
+        iframe.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture; microphone; camera');
+        iframe.allowFullscreen = true;
+        iframe.title = 'visual-video';
         container.appendChild(iframe);
       }
     },
@@ -1409,9 +1482,16 @@
         let config = data.mediaUrl;
         if (typeof config === 'string') { try { config = JSON.parse(config); } catch (e) { return; } }
         if (!config || typeof config !== 'object') return;
+        const wrapper = document.createElement('div');
+        wrapper.style.position = 'relative';
+        wrapper.style.width = '100%';
+        wrapper.style.minHeight = '250px';
         const canvas = document.createElement('canvas');
-        canvas.style.maxWidth = '100%';
-        container.appendChild(canvas);
+        wrapper.appendChild(canvas);
+        container.appendChild(wrapper);
+        if (!config.options) config.options = {};
+        config.options.responsive = true;
+        config.options.maintainAspectRatio = true;
         const instance = new Chart(canvas.getContext('2d'), config);
         container._chartInstance = instance;
       },
@@ -1546,6 +1626,9 @@
 
       this._activeType = null;
       this._activeCategory = null;
+      this._stickyTypes = this._config.stickyTypes instanceof Set
+        ? this._config.stickyTypes
+        : DEFAULT_STICKY_TYPES;
 
       if (this._config.libraries) {
         Object.entries(this._config.libraries).forEach(([name, lib]) => { if (lib) this._loader.provide(name, lib); });
@@ -1613,9 +1696,10 @@
       };
 
       try {
-        await renderer.render(context.data, renderTarget, renderContext);
         if (category === GENUI_CATEGORY.BOARD) this._container.showBoard(renderTarget);
         else this._container.showVisual(renderTarget);
+
+        await renderer.render(context.data, renderTarget, renderContext);
 
         this._activeType = type;
         this._activeCategory = category;
@@ -1633,6 +1717,10 @@
     }
 
     _handleHide(evt) {
+      if (this._activeType && this._stickyTypes.has(this._activeType)) {
+        this._log.debug('Ignoring server hide event — active type is sticky:', this._activeType);
+        return;
+      }
       const target = HIDE_EVENT_MAP[evt];
       if (target === 'visual') this._container.hideVisual();
       else if (target === 'board') this._container.hideBoard();
@@ -1713,7 +1801,10 @@
           dismissible: config.genui?.dismissible !== false,
           cssPrefix: config.genui?.cssPrefix || 'kav-genui',
           libraries: config.genui?.libraries || {},
-          renderers: config.genui?.renderers || {}
+          renderers: config.genui?.renderers || {},
+          stickyTypes: config.genui?.stickyTypes !== undefined
+            ? new Set(config.genui.stickyTypes)
+            : DEFAULT_STICKY_TYPES
         })
       });
 
@@ -1794,6 +1885,7 @@
     disconnect() {
       if (this._state.is(State.DESTROYED, State.UNINITIALIZED)) return;
       this._intentionalDisconnect = true;
+      this._genui.hide();
       this._cleanupMedia();
       this._cleanupConnection();
       this._state.transition(State.ENDED);
@@ -2006,6 +2098,7 @@
         this._socket.on('disconnect', (reason) => {
           this._log.info('Socket disconnected', reason);
           if (this._intentionalDisconnect) return;
+          this._genui.hide();
           if (this._state.is(State.IN_CONVERSATION, State.JOINED, State.JOINING)) {
             this._state.transition(State.ERROR);
             this._emitter.emit(Events.ERROR, new AvatarError(ErrorCode.CONNECTION_LOST, `Disconnected: ${reason}`, { recoverable: true }));

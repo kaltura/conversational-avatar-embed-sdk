@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kaltura Avatar SDK</title>
-    <meta name="description" content="Embed AI avatar conversations in any website. Use with Claude, ChatGPT, or any AI coding agent to build apps instantly.">
+    <title>Kaltura Avatar SDK — Embed AI Avatars in Any Website</title>
+    <meta name="description" content="JavaScript SDK for embedding AI avatar conversations with real-time video, speech recognition, and rich visual content. Works with Claude, ChatGPT, or any AI coding agent.">
+    <meta name="keywords" content="kaltura, avatar, ai, sdk, conversational ai, webrtc, embed, video chat, javascript, real-time">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -13,10 +14,10 @@
             color: #e0e0e8;
             line-height: 1.7;
             padding: 48px 24px;
-            max-width: 720px;
+            max-width: 800px;
             margin: 0 auto;
         }
-        h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
         h2 { font-size: 20px; font-weight: 600; margin: 48px 0 16px; border-bottom: 1px solid #2a2a3a; padding-bottom: 8px; }
         p { margin-bottom: 16px; color: #a0a0b8; }
         a { color: #7b93ff; text-decoration: none; }
@@ -40,6 +41,12 @@
             font-family: 'SF Mono', 'Fira Code', monospace;
             color: #c0c0d0;
         }
+        .badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
         .badge {
             display: inline-block;
             padding: 4px 10px;
@@ -48,9 +55,28 @@
             border-radius: 12px;
             font-size: 12px;
             color: #a0a0b8;
-            margin-bottom: 16px;
         }
         .badge strong { color: #4ade80; }
+        .sdk-cards {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin: 20px 0 32px;
+        }
+        .sdk-card {
+            padding: 20px;
+            background: #1a1a28;
+            border: 1px solid #2a2a3a;
+            border-radius: 12px;
+            transition: border-color 0.2s;
+        }
+        .sdk-card:hover { border-color: #7b93ff; }
+        .sdk-card h3 { font-size: 16px; margin-bottom: 6px; color: #e0e0e8; }
+        .sdk-card .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+        .sdk-card .tag-new { background: #1a3a28; color: #4ade80; }
+        .sdk-card .tag-legacy { background: #2a2a3a; color: #888; }
+        .sdk-card p { font-size: 13px; margin-bottom: 12px; }
+        .sdk-card a { font-size: 13px; }
         .demos {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -87,30 +113,42 @@
         }
         footer a { color: #666680; }
         footer a:hover { color: #a0a0b8; }
-        @media (max-width: 500px) {
-            .demos { grid-template-columns: 1fr; }
+        @media (max-width: 600px) {
+            .sdk-cards, .demos { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
 
-<div class="badge"><strong>~6KB</strong> &middot; Zero dependencies &middot; Works everywhere</div>
+<div class="badges">
+    <span class="badge"><strong>v2</strong> Direct WebRTC</span>
+    <span class="badge"><strong>v1</strong> Iframe embed</span>
+    <span class="badge">MIT License</span>
+    <span class="badge">TypeScript ready</span>
+</div>
 <h1>Kaltura Avatar SDK</h1>
-<p>Embed AI avatar conversations in any website. One script tag, a few lines of code, and you have a talking AI avatar with real-time speech, dynamic context, and full event control.</p>
+<p>Embed AI avatar conversations in any website. Real-time video, speech recognition, dynamic context injection, and rich visual content (charts, tables, code, diagrams) — all from a few lines of JavaScript.</p>
 
-<h2>Use with AI Coding Agents</h2>
-<p>This repo is designed to work as an <strong>instant skill</strong> for AI coding agents. Point your agent at this repo and tell it what to build &mdash; it understands the full SDK, all advanced patterns, and how to write the avatar's Knowledge Base prompt.</p>
+<h2>Choose Your SDK</h2>
+<div class="sdk-cards">
+    <div class="sdk-card">
+        <h3>SDK v2<span class="tag tag-new">Recommended</span></h3>
+        <p>Direct Socket.IO + WebRTC connection. Full control over video, audio, GenUI rendering, and all events. ~45KB + Socket.IO.</p>
+        <a href="sdk-v2/README.md">Documentation</a> · <a href="sdk-v2/examples/demo/">Live Demo</a>
+    </div>
+    <div class="sdk-card">
+        <h3>SDK v1<span class="tag tag-legacy">Legacy</span></h3>
+        <p>Iframe-based embed. Zero dependencies, ~6KB minified. Simple drop-in for basic use cases.</p>
+        <a href="AGENTS.md">Documentation</a> · <a href="examples/basic_demo/">Basic Demo</a>
+    </div>
+</div>
 
-<p><strong>Claude Code / Claude Projects:</strong> Add this repo as context, then prompt:</p>
-<div class="prompt-box">"Build me a customer onboarding avatar using this SDK. My client ID is 123456, flow ID is agent-7."</div>
+<h2>Quick Start (v2)</h2>
+<pre>&lt;div id="avatar" style="width:800px;height:600px;background:#000"&gt;&lt;/div&gt;
 
-<p><strong>ChatGPT / Copilot / Any Agent:</strong> Paste <a href="AGENTS.md">AGENTS.md</a> into your system prompt, then ask away.</p>
+&lt;script src="https://cdn.socket.io/4.7.2/socket.io.min.js"&gt;&lt;/script&gt;
+&lt;script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-v2/dist/kaltura-avatar-sdk.js"&gt;&lt;/script&gt;
 
-<p>The agent generates both the <strong>app code</strong> (HTML + JS with DPP injection and spoken command detection) and the <strong>Knowledge Base prompt</strong> (paste into Kaltura Studio).</p>
-
-<h2>Quick Start</h2>
-<pre>&lt;div id="avatar" style="width:800px;height:600px"&gt;&lt;/div&gt;
-&lt;script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk/kaltura-avatar-sdk.min.js"&gt;&lt;/script&gt;
 &lt;script&gt;
 const sdk = new KalturaAvatarSDK({
   clientId: 'YOUR_CLIENT_ID',
@@ -118,45 +156,47 @@ const sdk = new KalturaAvatarSDK({
   container: '#avatar'
 });
 
-sdk.on('showing-agent', () =&gt; {
-  setTimeout(() =&gt; sdk.injectPrompt(JSON.stringify({ greeting: "Hello!" })), 500);
-});
-
-sdk.on('agent-talked', (data) =&gt; {
-  console.log('Avatar said:', data.agentContent || data);
-});
-
-await sdk.start();
+sdk.on('avatar-speech', ({ text }) =&gt; console.log('Avatar:', text));
+sdk.connect();
 &lt;/script&gt;</pre>
+
+<h2>Use with AI Coding Agents</h2>
+<p>This repo works as an <strong>instant skill</strong> for Claude, ChatGPT, Copilot, and any AI coding agent. Point your agent at this repo and tell it what to build:</p>
+<div class="prompt-box">"Build me a customer onboarding avatar. My client ID is 123456, flow ID is agent-7."</div>
+<p>The agent generates both the <strong>app code</strong> (HTML + JS) and the <strong>Knowledge Base prompt</strong> (paste into Kaltura Studio). See <a href="AGENTS.md">AGENTS.md</a> for the full reference.</p>
 
 <h2>Live Demos</h2>
 <div class="demos">
-    <a href="examples/att_lily/">AT&T Seller Hub<span>Sales coaching + knowledge checks</span></a>
+    <a href="sdk-v2/examples/demo/">SDK v2 Demo<span>GenUI, events, transcript, full control</span></a>
+    <a href="examples/att_lily/">AT&T Seller Hub<span>Dual-avatar sales coaching</span></a>
     <a href="examples/hr_avatar/">HR Avatar<span>Interview simulations + AI analysis</span></a>
     <a href="examples/code_interview/">Code Interview<span>Pair programming + live code context</span></a>
-    <a href="examples/basic_demo/">Basic Demo<span>Minimal starter example</span></a>
-    <a href="examples/test_harness/">Test Harness<span>Manual testing of all SDK capabilities</span></a>
+    <a href="examples/basic_demo/">Basic Demo<span>Minimal v1 starter example</span></a>
+    <a href="examples/test_harness/">Test Harness<span>All SDK v1 capabilities</span></a>
 </div>
 
-<h2>Key Capabilities</h2>
-<p>All of these are documented in <a href="AGENTS.md">AGENTS.md</a> with working code examples:</p>
-<ul style="margin: 0 0 24px 20px; color: #a0a0b8; font-size: 15px;">
-    <li><strong>Dynamic Prompt Injection (DPP)</strong> &mdash; inject JSON context at runtime to control avatar behavior per session</li>
-    <li><strong>Avatar Spoken Commands</strong> &mdash; avatar speaks trigger phrases that fire JavaScript functions</li>
-    <li><strong>Transcripts</strong> &mdash; built-in recording with export to text, markdown, or JSON</li>
-    <li><strong>RICECO framework</strong> &mdash; structured guide for writing great Knowledge Base prompts</li>
+<h2>Key Features</h2>
+<ul style="margin: 0 0 24px 20px; color: #a0a0b8; font-size: 15px; line-height: 2;">
+    <li><strong>GenUI Rendering</strong> (v2) — Charts, tables, code editors, diagrams, videos, images render automatically</li>
+    <li><strong>Dynamic Prompt Injection (DPP)</strong> — Inject JSON context at runtime to control avatar behavior</li>
+    <li><strong>Avatar Spoken Commands</strong> — Avatar speaks trigger phrases that fire JavaScript functions</li>
+    <li><strong>Transcripts</strong> — Built-in recording with export to text, markdown, or JSON</li>
+    <li><strong>Auto-reconnect</strong> (v2) — Exponential backoff handles network drops gracefully</li>
+    <li><strong>Graceful degradation</strong> (v2) — Falls back to audio-only or text-only automatically</li>
 </ul>
 
 <h2>Links</h2>
 <ul style="margin: 0 0 24px 20px; color: #a0a0b8; font-size: 15px;">
-    <li><a href="AGENTS.md">AI Agent Guide</a> &mdash; full SDK reference + patterns + RICECO framework</li>
-    <li><a href="sdk/kaltura-avatar-sdk.d.ts">TypeScript API</a> &mdash; complete type definitions</li>
-    <li><a href="CONTRIBUTING.md">Contributing</a> &mdash; how to add a new demo app</li>
-    <li><a href="https://github.com/kaltura/conversational-avatar-embed-sdk">GitHub Repo</a></li>
+    <li><a href="sdk-v2/README.md">SDK v2 Documentation</a> — Configuration, events, methods, error codes</li>
+    <li><a href="AGENTS.md">AI Agent Guide</a> — Full SDK reference + RICECO prompt framework</li>
+    <li><a href="sdk-v2/dist/kaltura-avatar-sdk.d.ts">TypeScript API (v2)</a></li>
+    <li><a href="sdk/kaltura-avatar-sdk.d.ts">TypeScript API (v1)</a></li>
+    <li><a href="CONTRIBUTING.md">Contributing</a></li>
+    <li><a href="https://github.com/kaltura/conversational-avatar-embed-sdk">GitHub</a></li>
 </ul>
 
 <footer>
-    <p><a href="LICENSE">MIT License</a> &middot; <a href="https://github.com/kaltura">Kaltura</a></p>
+    <p><a href="LICENSE">MIT License</a> · <a href="https://github.com/kaltura">Kaltura</a></p>
 </footer>
 
 </body>

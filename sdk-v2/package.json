@@ -1,0 +1,41 @@
+{
+  "name": "@kaltura/avatar-sdk-v2",
+  "version": "2.0.0",
+  "description": "Kaltura Avatar SDK v2 — Direct Socket.IO + WebRTC connection to AI Avatars (no iframe)",
+  "license": "MIT",
+  "main": "dist/kaltura-avatar-sdk.js",
+  "types": "dist/kaltura-avatar-sdk.d.ts",
+  "keywords": [
+    "kaltura",
+    "avatar",
+    "ai",
+    "sdk",
+    "webrtc",
+    "conversational-ai",
+    "video-chat",
+    "socket.io",
+    "genui",
+    "real-time"
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.44.0",
+    "socket.io-client": "^4.7.2"
+  },
+  "peerDependencies": {
+    "socket.io-client": "^4.0.0"
+  },
+  "scripts": {
+    "test": "npx playwright test tests/e2e/sdk-unit.spec.js tests/e2e/genui.spec.js",
+    "test:live": "npx playwright test tests/e2e/live-flow.spec.js",
+    "test:all": "npx playwright test",
+    "demo": "python3 -m http.server 8090 --directory ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kaltura/conversational-avatar-embed-sdk",
+    "directory": "sdk-v2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

@@ -128,6 +128,16 @@ export interface GenUIConfig {
   libraries: Record<string, unknown>;
   /** Pre-register custom renderers by type */
   renderers: Record<string, GenUIRenderer>;
+  /**
+   * GenUI types that ignore server-sent hide events (default: ['showVisualVideo']).
+   *
+   * Sticky content stays visible until the user dismisses it (close button / Escape),
+   * a new show* event replaces it, or the developer calls sdk.hideGenUI().
+   * This prevents videos from closing prematurely when the server reacts to user speech.
+   *
+   * Set to an empty array to disable sticky behavior entirely.
+   */
+  stickyTypes: string[];
 }
 
 export interface GenUIRenderer {
