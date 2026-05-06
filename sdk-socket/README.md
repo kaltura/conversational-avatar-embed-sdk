@@ -382,6 +382,27 @@ sdk.on('genui', ({ type, data }) => {
 });
 ```
 
+#### Auto-Pause During Video
+
+By default, the SDK automatically pauses the conversation when a `showVisualVideo` is rendered. The avatar goes idle and silent while the user watches. When the user dismisses the video (close button or Escape), the conversation resumes automatically.
+
+```javascript
+// Enabled by default — no configuration needed
+const sdk = new KalturaAvatarSDK({ clientId, flowId, container: '#avatar' });
+
+// Disable auto-pause:
+const sdk = new KalturaAvatarSDK({
+  clientId, flowId, container: '#avatar',
+  genui: { pauseTypes: [] }
+});
+
+// Extend to pause for other content types too:
+const sdk = new KalturaAvatarSDK({
+  clientId, flowId, container: '#avatar',
+  genui: { pauseTypes: ['showVisualVideo', 'showIFrame', 'showCode'] }
+});
+```
+
 ### Server Info & Session Events
 
 | Event | When It Fires | What You Get |

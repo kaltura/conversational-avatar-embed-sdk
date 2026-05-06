@@ -144,6 +144,15 @@ export interface GenUIConfig {
    * Set to an empty array to disable sticky behavior entirely.
    */
   stickyTypes: string[];
+  /**
+   * GenUI types that auto-pause the conversation while displayed (default: ['showVisualVideo']).
+   *
+   * When content of a matching type is rendered, the avatar pauses (stops listening/responding).
+   * The conversation resumes automatically when the content is dismissed.
+   *
+   * Set to an empty array to disable auto-pause entirely.
+   */
+  pauseTypes: string[];
 }
 
 export interface GenUIRenderer {

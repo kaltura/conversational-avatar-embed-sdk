@@ -1208,6 +1208,103 @@ test.describe('GenUI Rendering System', () => {
   });
 
   // ════════════════════════════════════════════════════════════════════════
+  // SUITE: Auto-Pause During Video
+  // ════════════════════════════════════════════════════════════════════════
+
+  test.describe('Auto-Pause During Video', () => {
+
+    test('showVisualVideo triggers pauseConversation on socket', async () => {
+      const result = await page.evaluate(async () => {
+        const { GenUIManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const logger = new Logger('test', false);
+        const mgr = new GenUIManager(emitter, { enabled: true, pauseTypes: ['showVisualVideo'] }, logger);
+        const parent = document.createElement('div');
+        document.body.appendChild(parent);
+        mgr.attach(parent);
+
+        const emitted = [];
+        const mockSocket = { emit(evt, data) { emitted.push({ evt, data }); }, on() {} };
+        mgr.bindSocket(mockSocket);
+
+        await mgr._handleShow('showVisualVideo', { mediaUrl: 'https://example.com/video' });
+        document.body.removeChild(parent);
+        return emitted;
+      });
+      const pause = result.find(e => e.evt === 'pauseConversation');
+      expect(pause).toBeTruthy();
+    });
+
+    test('dismissing video triggers resumeConversation on socket', async () => {
+      const result = await page.evaluate(async () => {
+        const { GenUIManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const logger = new Logger('test', false);
+        const mgr = new GenUIManager(emitter, { enabled: true, pauseTypes: ['showVisualVideo'] }, logger);
+        const parent = document.createElement('div');
+        document.body.appendChild(parent);
+        mgr.attach(parent);
+
+        const emitted = [];
+        const mockSocket = { emit(evt, data) { emitted.push({ evt, data }); }, on() {} };
+        mgr.bindSocket(mockSocket);
+
+        await mgr._handleShow('showVisualVideo', { mediaUrl: 'https://example.com/video' });
+        mgr.hide('visual');
+        document.body.removeChild(parent);
+        return emitted;
+      });
+      const resume = result.find(e => e.evt === 'resumeConversation');
+      expect(resume).toBeTruthy();
+    });
+
+    test('non-pause type does not trigger pauseConversation', async () => {
+      const result = await page.evaluate(async () => {
+        const { GenUIManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const logger = new Logger('test', false);
+        const mgr = new GenUIManager(emitter, { enabled: true, pauseTypes: ['showVisualVideo'] }, logger);
+        const parent = document.createElement('div');
+        document.body.appendChild(parent);
+        mgr.attach(parent);
+
+        const emitted = [];
+        const mockSocket = { emit(evt, data) { emitted.push({ evt, data }); }, on() {} };
+        mgr.bindSocket(mockSocket);
+
+        await mgr._handleShow('showHtml', { mediaUrl: '<p>Hello</p>' });
+        document.body.removeChild(parent);
+        return emitted;
+      });
+      const pause = result.find(e => e.evt === 'pauseConversation');
+      expect(pause).toBeFalsy();
+    });
+
+    test('empty pauseTypes disables auto-pause entirely', async () => {
+      const result = await page.evaluate(async () => {
+        const { GenUIManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const logger = new Logger('test', false);
+        const mgr = new GenUIManager(emitter, { enabled: true, pauseTypes: [] }, logger);
+        const parent = document.createElement('div');
+        document.body.appendChild(parent);
+        mgr.attach(parent);
+
+        const emitted = [];
+        const mockSocket = { emit(evt, data) { emitted.push({ evt, data }); }, on() {} };
+        mgr.bindSocket(mockSocket);
+
+        await mgr._handleShow('showVisualVideo', { mediaUrl: 'https://example.com/video' });
+        document.body.removeChild(parent);
+        return emitted;
+      });
+      const pause = result.find(e => e.evt === 'pauseConversation');
+      expect(pause).toBeFalsy();
+    });
+
+  });
+
+  // ════════════════════════════════════════════════════════════════════════
   // SUITE 13: Edge Cases & Resilience
   // ════════════════════════════════════════════════════════════════════════
 

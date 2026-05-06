@@ -1647,9 +1647,13 @@
 
       this._activeType = null;
       this._activeCategory = null;
+      this._pausedByGenUI = false;
       this._stickyTypes = this._config.stickyTypes instanceof Set
         ? this._config.stickyTypes
         : DEFAULT_STICKY_TYPES;
+      this._pauseTypes = this._config.pauseTypes instanceof Set
+        ? this._config.pauseTypes
+        : new Set(this._config.pauseTypes || ['showVisualVideo']);
 
       if (this._config.libraries) {
         Object.entries(this._config.libraries).forEach(([name, lib]) => { if (lib) this._loader.provide(name, lib); });
@@ -1667,6 +1671,7 @@
         this._emitter.emit(Events.GENUI_HIDDEN, { type: this._activeType, category });
         this._activeType = null;
         this._activeCategory = null;
+        this._resumeIfPaused();
       });
     }
 
@@ -1731,6 +1736,12 @@
           }
         }
         this._emitter.emit(Events.GENUI_RENDERED, { type, data: context.data, category, element: renderTarget });
+
+        if (this._pauseTypes.has(type) && this._socket && !this._pausedByGenUI) {
+          this._socket.emit('pauseConversation', {});
+          this._pausedByGenUI = true;
+          this._log.debug('Conversation paused for GenUI type:', type);
+        }
       } catch (err) {
         this._log.error('GenUI render error [' + type + ']:', err.message);
         this._emitter.emit(Events.GENUI_ERROR, { type, error: err });
@@ -1746,12 +1757,22 @@
       if (target === 'visual') this._container.hideVisual();
       else if (target === 'board') this._container.hideBoard();
       else this._container.hideAll();
+      this._resumeIfPaused();
     }
 
     hide(category) {
       if (!category) this._container.hideAll();
       else if (category === 'board') this._container.hideBoard();
       else if (category === 'visual') this._container.hideVisual();
+      this._resumeIfPaused();
+    }
+
+    _resumeIfPaused() {
+      if (this._pausedByGenUI && this._socket) {
+        this._socket.emit('resumeConversation', {});
+        this._pausedByGenUI = false;
+        this._log.debug('Conversation resumed after GenUI dismissed');
+      }
     }
 
     registerRenderer(type, renderer) { return this._registry.register(type, renderer); }
@@ -1909,7 +1930,10 @@
           renderers: config.genui?.renderers || {},
           stickyTypes: config.genui?.stickyTypes !== undefined
             ? new Set(config.genui.stickyTypes)
-            : DEFAULT_STICKY_TYPES
+            : DEFAULT_STICKY_TYPES,
+          pauseTypes: config.genui?.pauseTypes !== undefined
+            ? config.genui.pauseTypes
+            : ['showVisualVideo']
         })
       });
 
