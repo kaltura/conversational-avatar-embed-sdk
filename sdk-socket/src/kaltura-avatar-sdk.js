@@ -1242,6 +1242,7 @@
     }
 
     hideBoard() {
+      if (!this._boardLayer) return false;
       if (this._boardLayer.style.display === 'none') return false;
       this._clearLayer(this._boardLayer);
       this._boardLayer.style.display = 'none';
@@ -1250,6 +1251,7 @@
     }
 
     hideVisual() {
+      if (!this._visualLayer) return false;
       if (this._visualLayer.style.display === 'none') return false;
       this._visualLayer.classList.remove('kav-genui__visual--active');
       this._restoreVideo();
