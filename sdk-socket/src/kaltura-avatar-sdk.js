@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.2.0
+ * @version 2.2.2
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.2.0';
+  const VERSION = '2.2.2';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
