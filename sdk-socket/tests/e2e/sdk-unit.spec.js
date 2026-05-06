@@ -305,6 +305,95 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────
+  // COMMAND TIMING
+  // ────────────────────────────────────────────────────────────────────
+
+  test('command timing: "after" only fires on after phase', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let count = 0;
+      cr.register('end', 'ending call', () => { count++; }, { timing: 'after' });
+      cr.check('ending call now', 'before');
+      cr.check('ending call now', 'after');
+      return count;
+    });
+    expect(result).toBe(1);
+  });
+
+  test('command timing: "before" only fires on before phase', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let count = 0;
+      cr.register('nav', 'next slide', () => { count++; }, { timing: 'before' });
+      cr.check('next slide please', 'before');
+      cr.check('next slide please', 'after');
+      return count;
+    });
+    expect(result).toBe(1);
+  });
+
+  test('command timing: "both" fires once per unique text (deduplicated)', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let count = 0;
+      cr.register('score', 'score is', () => { count++; }, { timing: 'both' });
+      cr.check('your score is 95', 'before');
+      cr.check('your score is 95', 'after');
+      return count;
+    });
+    expect(result).toBe(1);
+  });
+
+  test('command timing: "both" fires again for different text', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let count = 0;
+      cr.register('score', 'score is', () => { count++; }, { timing: 'both' });
+      cr.check('your score is 95', 'before');
+      cr.check('your score is 95', 'after');
+      cr.check('your score is 80', 'before');
+      return count;
+    });
+    expect(result).toBe(2);
+  });
+
+  test('command timing: default is "after"', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let count = 0;
+      cr.register('end', 'ending call', () => { count++; });
+      cr.check('ending call now', 'before');
+      cr.check('ending call now', 'after');
+      return count;
+    });
+    expect(result).toBe(1);
+  });
+
+  test('command timing: match object includes timing phase', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let matched = null;
+      cr.register('nav', 'next slide', (m) => { matched = m; }, { timing: 'before' });
+      cr.check('next slide now', 'before');
+      return matched;
+    });
+    expect(result.timing).toBe('before');
+    expect(result.command).toBe('nav');
+  });
+
+  // ────────────────────────────────────────────────────────────────────
   // DPP MANAGER
   // ────────────────────────────────────────────────────────────────────
 

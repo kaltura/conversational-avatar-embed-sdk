@@ -222,9 +222,31 @@ function updateAvatarContext(newData) {
 
 ## Pattern 2: Avatar Spoken Commands (Triggering JS Functions)
 
-The avatar can trigger JavaScript actions by speaking specific phrases. Your code listens to `AGENT_TALKED` events and pattern-matches on the text.
+The avatar can trigger JavaScript actions by speaking specific phrases. The **Socket SDK** provides `registerCommand()` for declarative pattern matching with timing control:
 
-### Basic Pattern
+### Socket SDK (Recommended)
+
+```javascript
+// Fire after avatar finishes speaking (default)
+sdk.registerCommand('end-session', 'ending call now', (match) => {
+  sdk.end();
+  showAnalysisScreen();
+}, { timing: 'after' });
+
+// Fire before avatar finishes speaking (instant — reacts to text-ready)
+sdk.registerCommand('next-slide', /navigating to slide (\d+)/i, (match) => {
+  goToSlide(match.text.match(/\d+/)[1]);
+}, { timing: 'before' });
+
+// Fire on both phases (deduplicated — runs once per unique text)
+sdk.registerCommand('score', /your score is \d+/, (match) => {
+  updateScoreUI(match.text);
+}, { timing: 'both' });
+```
+
+Timing options: `'before'` (triggers on `avatar-text-ready` — before audio), `'after'` (triggers on speech end — default), `'both'` (fires whichever comes first, deduplicated).
+
+### Iframe SDK (Basic Pattern)
 
 ```javascript
 sdk.on(KalturaAvatarSDK.Events.AGENT_TALKED, (data) => {

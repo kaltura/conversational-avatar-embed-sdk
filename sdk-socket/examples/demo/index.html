@@ -177,11 +177,14 @@ function doConnect() {
         media: { ariaLabel: 'Demo Avatar' }
     });
 
-    // Register a demo command
+    // Register demo commands
     sdk.registerCommand('end-session', 'ending call now', (match) => {
-        logEvent('command', `Command matched: "${match.command}" in "${match.text.substring(0, 50)}"`);
+        logEvent('command', `[${match.timing}] "${match.command}" in "${match.text.substring(0, 50)}"`);
         doDisconnect();
     });
+    sdk.registerCommand('navigate', /navigating to slide/i, (match) => {
+        logEvent('command', `[${match.timing}] "${match.command}" — instant reaction before speech finishes`);
+    }, { timing: 'before' });
     updateCommandList();
 
     // Wire up events

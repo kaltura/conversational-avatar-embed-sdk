@@ -491,6 +491,29 @@ sdk.onEndPhrase('ending call now', () => sdk.end());
 sdk.clearCommands();
 ```
 
+#### Command Timing
+
+By default, commands fire **after** the avatar finishes speaking. You can fire them **before** (as soon as the text is ready, before audio plays) for faster response:
+
+```javascript
+// Fire BEFORE the avatar finishes speaking (instant reaction)
+sdk.registerCommand('next-slide', 'navigating to slide', (match) => {
+  goToNextSlide();
+}, { timing: 'before' });
+
+// Fire AFTER the avatar finishes speaking (default behavior)
+sdk.registerCommand('end-session', 'ending call now', (match) => {
+  sdk.end();
+}, { timing: 'after' });
+
+// Fire on BOTH phases (deduplicated — handler runs only once per unique text)
+sdk.registerCommand('score', /score is \d+/, (match) => {
+  updateScoreDisplay(match.text);
+}, { timing: 'both' });
+```
+
+The `match` object includes a `timing` field indicating which phase triggered it (`'before'` or `'after'`).
+
 ### Transcript
 
 ```javascript

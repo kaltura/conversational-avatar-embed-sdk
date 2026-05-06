@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.1.0
+ * @version 2.2.0
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.1.0';
+  const VERSION = '2.2.0';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -496,27 +496,39 @@
       this._emitter = emitter;
     }
 
-    register(name, pattern, handler) {
+    register(name, pattern, handler, options) {
+      const timing = options?.timing || 'after';
       const matcher = pattern instanceof RegExp
         ? (text) => pattern.test(text)
         : (text) => text.toLowerCase().includes(pattern.toLowerCase());
 
-      this._commands.set(name, { pattern, matcher, handler });
+      this._commands.set(name, { pattern, matcher, handler, timing, _firedTexts: new Set() });
       return () => this._commands.delete(name);
     }
 
-    check(text) {
+    check(text, phase = 'after') {
       if (!text) return;
       for (const [name, cmd] of this._commands) {
-        if (cmd.matcher(text)) {
-          const match = { command: name, text, pattern: cmd.pattern };
-          try {
-            cmd.handler(match);
-          } catch (e) {
-            console.error(`Command handler error [${name}]:`, e);
+        const shouldFire = cmd.timing === 'both' || cmd.timing === phase;
+        if (!shouldFire) continue;
+        if (!cmd.matcher(text)) continue;
+        // For 'both' timing, prevent double-fire for the same text
+        if (cmd.timing === 'both') {
+          if (cmd._firedTexts.has(text)) continue;
+          cmd._firedTexts.add(text);
+          // Keep set bounded
+          if (cmd._firedTexts.size > 50) {
+            const first = cmd._firedTexts.values().next().value;
+            cmd._firedTexts.delete(first);
           }
-          this._emitter.emit(Events.COMMAND_MATCHED, match);
         }
+        const match = { command: name, text, pattern: cmd.pattern, timing: phase };
+        try {
+          cmd.handler(match);
+        } catch (e) {
+          console.error(`Command handler error [${name}]:`, e);
+        }
+        this._emitter.emit(Events.COMMAND_MATCHED, match);
       }
     }
 
@@ -2076,14 +2088,14 @@
     // COMMANDS
     // ─────────────────────────────────────────────────────────────────────────
 
-    registerCommand(name, pattern, handler) {
-      return this._commands.register(name, pattern, handler);
+    registerCommand(name, pattern, handler, options) {
+      return this._commands.register(name, pattern, handler, options);
     }
 
-    onEndPhrase(phrase, handler) {
+    onEndPhrase(phrase, handler, options) {
       return this._commands.register('__end__', phrase, (match) => {
         handler(match);
-      });
+      }, options);
     }
 
     clearCommands() { this._commands.clear(); }
@@ -2315,6 +2327,7 @@
         // Avatar speech
         this._socket.on('debug_stvTaskGenerated', (data) => {
           if (data?.text) {
+            this._commands.check(data.text, 'before');
             this._emitter.emit(Events.AVATAR_TEXT_READY, { text: data.text });
           }
         });
@@ -2330,7 +2343,7 @@
           if (data?.agentContent) {
             const text = data.agentContent;
             this._transcript.add('Avatar', text);
-            this._commands.check(text);
+            this._commands.check(text, 'after');
             this._emitter.emit(Events.AVATAR_SPEECH, { text });
             this._emitter.emit(Events.AGENT_TALKED, { agentContent: text });
           }

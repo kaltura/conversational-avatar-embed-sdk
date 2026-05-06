@@ -90,6 +90,12 @@ export interface CommandMatch {
   command: string;
   text: string;
   pattern: string | RegExp;
+  timing: 'before' | 'after';
+}
+
+export interface CommandOptions {
+  /** When to fire: 'before' (on text-ready), 'after' (on finished speaking), 'both' (default: 'after') */
+  timing?: 'before' | 'after' | 'both';
 }
 
 export interface StateChangePayload {
@@ -381,9 +387,9 @@ export declare class KalturaAvatarSDK {
 
   // ── Spoken Commands ──
   /** Register a command triggered when avatar speaks a matching phrase */
-  registerCommand(name: string, pattern: string | RegExp, handler: (match: CommandMatch) => void): () => void;
+  registerCommand(name: string, pattern: string | RegExp, handler: (match: CommandMatch) => void, options?: CommandOptions): () => void;
   /** Convenience: register an end-of-session trigger phrase */
-  onEndPhrase(phrase: string, handler: (match: CommandMatch) => void): () => void;
+  onEndPhrase(phrase: string, handler: (match: CommandMatch) => void, options?: CommandOptions): () => void;
   /** Remove all registered commands */
   clearCommands(): void;
 
