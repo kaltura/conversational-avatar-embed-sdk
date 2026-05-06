@@ -1648,6 +1648,8 @@
       this._activeType = null;
       this._activeCategory = null;
       this._pausedByGenUI = false;
+      this._onPause = null;
+      this._onResume = null;
       this._stickyTypes = this._config.stickyTypes instanceof Set
         ? this._config.stickyTypes
         : DEFAULT_STICKY_TYPES;
@@ -1688,6 +1690,14 @@
 
     async _handleShow(type, data) {
       const category = BOARD_TYPES.has(type) ? GENUI_CATEGORY.BOARD : GENUI_CATEGORY.VISUAL;
+
+      if (this._pauseTypes.has(type) && !this._pausedByGenUI) {
+        if (this._onPause) this._onPause();
+        else if (this._socket) this._socket.emit('pauseConversation', {});
+        this._pausedByGenUI = true;
+        this._log.debug('Conversation paused for GenUI type:', type);
+      }
+
       const context = { type, data, category, cancelled: false };
 
       for (const mw of this._registry.getMiddleware()) {
@@ -1736,12 +1746,6 @@
           }
         }
         this._emitter.emit(Events.GENUI_RENDERED, { type, data: context.data, category, element: renderTarget });
-
-        if (this._pauseTypes.has(type) && this._socket && !this._pausedByGenUI) {
-          this._socket.emit('pauseConversation', {});
-          this._pausedByGenUI = true;
-          this._log.debug('Conversation paused for GenUI type:', type);
-        }
       } catch (err) {
         this._log.error('GenUI render error [' + type + ']:', err.message);
         this._emitter.emit(Events.GENUI_ERROR, { type, error: err });
@@ -1768,13 +1772,15 @@
     }
 
     _resumeIfPaused() {
-      if (this._pausedByGenUI && this._socket) {
-        this._socket.emit('resumeConversation', {});
+      if (this._pausedByGenUI) {
+        if (this._onResume) this._onResume();
+        else if (this._socket) this._socket.emit('resumeConversation', {});
         this._pausedByGenUI = false;
         this._log.debug('Conversation resumed after GenUI dismissed');
       }
     }
 
+    setPauseHandlers(onPause, onResume) { this._onPause = onPause; this._onResume = onResume; }
     registerRenderer(type, renderer) { return this._registry.register(type, renderer); }
     use(middleware) { return this._registry.use(middleware); }
     provideLibrary(name, lib) { this._loader.provide(name, lib); }
@@ -2437,6 +2443,16 @@
 
         // GenUI + contact collection (handled by GenUIManager)
         this._genui.bindSocket(this._socket);
+        this._genui.setPauseHandlers(
+          () => {
+            this._socket.emit('pauseConversation', {});
+            this._mic.mute();
+          },
+          () => {
+            this._socket.emit('resumeConversation', {});
+            this._mic.unmute();
+          }
+        );
 
         // Error events
         this._socket.on('stvTaskFail', (data) => {
