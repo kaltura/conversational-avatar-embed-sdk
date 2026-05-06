@@ -129,6 +129,8 @@ sdk.pause()                // Pause the conversation
 sdk.resume()               // Resume the conversation
 sdk.sendCameraCapture(dataUrl)  // Send camera screenshot for avatar analysis
 sdk.sendScreenCapture(dataUrl)  // Send screen screenshot for avatar analysis
+sdk.submitContact('email', value)  // Submit contact info (avatar resumes)
+sdk.rejectContact('email')         // Decline contact request (avatar resumes)
 ```
 
 ### Events
@@ -300,6 +302,46 @@ Pronunciation guide:
 <lexeme><grapheme>SaaS</grapheme><alias>sass</alias></lexeme>
 <lexeme><grapheme>Acme Corp</grapheme><alias>Acmee Corp</alias></lexeme>
 ```
+
+---
+
+## Pattern 4: Contact Collection (Critical)
+
+When the avatar is configured to collect contact information (email or phone), **the server pauses and waits** until the client responds. The avatar becomes unresponsive until your app either submits the info or rejects the request.
+
+### Socket SDK
+
+With default GenUI rendering enabled, the SDK handles this automatically — it shows a validated form with submit/skip buttons. No code needed.
+
+If you've disabled GenUI rendering or need custom handling:
+
+```javascript
+sdk.on('genui', ({ type }) => {
+  if (type === 'contactEmail') {
+    showEmailForm({
+      onSubmit: (email) => sdk.submitContact('email', email),
+      onCancel: () => sdk.rejectContact('email')
+    });
+  }
+  if (type === 'contactPhone') {
+    showPhoneForm({
+      onSubmit: (phone) => sdk.submitContact('phone', phone),
+      onCancel: () => sdk.rejectContact('phone')
+    });
+  }
+});
+```
+
+### Iframe SDK
+
+```javascript
+// You must handle this — the avatar will freeze until you respond
+sdk.sendMessage({ type: 'contactInfoReceived', contact_info: { info_type: 'email', info_value: 'user@example.com' } });
+// Or reject:
+sdk.sendMessage({ type: 'contactInfoRejected', type: 'email' });
+```
+
+**Key point:** If you don't call `submitContact()` or `rejectContact()`, the avatar hangs indefinitely. Always provide both a submit and a cancel/skip path in your UI.
 
 ---
 

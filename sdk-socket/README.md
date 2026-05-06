@@ -570,6 +570,43 @@ sdk.pause();    // Pause the avatar (stops listening/speaking)
 sdk.resume();   // Resume the conversation
 ```
 
+### Contact Collection
+
+When the avatar asks the user for their email or phone number, **the server pauses and waits** for a response. The avatar will remain unresponsive until your app either submits the contact info or explicitly rejects the request.
+
+```javascript
+// User provided their email — submit it to resume the conversation
+sdk.submitContact('email', 'user@example.com');
+
+// User provided their phone number
+sdk.submitContact('phone', '15551234567');
+
+// User declined to share — this also resumes the conversation
+sdk.rejectContact('email');
+sdk.rejectContact('phone');
+```
+
+**If you're using the built-in GenUI renderer** (default), the SDK renders a contact form automatically with validation, submit, and skip buttons — no code needed.
+
+**If you've disabled GenUI rendering** (`genui: { enabled: false }`) or are building a custom UI, you must listen for the contact request and call one of the above methods:
+
+```javascript
+sdk.on('genui', ({ type, data }) => {
+  if (type === 'contactEmail') {
+    showMyEmailForm({
+      onSubmit: (email) => sdk.submitContact('email', email),
+      onCancel: () => sdk.rejectContact('email')
+    });
+  }
+  if (type === 'contactPhone') {
+    showMyPhoneForm({
+      onSubmit: (phone) => sdk.submitContact('phone', phone),
+      onCancel: () => sdk.rejectContact('phone')
+    });
+  }
+});
+```
+
 ### Camera & Screen Capture
 
 Send visual context to the avatar for analysis (when enabled in Studio):
