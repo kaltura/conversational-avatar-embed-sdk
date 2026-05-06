@@ -212,6 +212,65 @@ export interface ReconnectingPayload {
   maxAttempts: number;
 }
 
+export interface ServerConnectedPayload {
+  agentName: string | null;
+  loadingVideoUrl: string | null;
+}
+
+export interface ConfiguredPayload {
+  agentName: string | null;
+  language: string;
+  features: ServerFeatures | null;
+  videosCount: number;
+  photosCount: number;
+  hasInitialHtml: boolean;
+}
+
+export interface TimeWarningPayload {
+  remainingSeconds: number;
+}
+
+export interface ServerFeatures {
+  tapToTalk: boolean;
+  interruptions: boolean;
+  pause: boolean;
+  screenShare: boolean;
+  cameraAnalysis: boolean;
+  webSearch: boolean;
+  smartTurn: { enabled: boolean; timeoutMs: number } | null;
+}
+
+export interface ServerVideoAsset {
+  id: string;
+  url: string;
+  metadata: Record<string, string>;
+}
+
+export interface ServerPhotoAsset {
+  id: string;
+  url: string;
+  metadata: Record<string, string>;
+}
+
+export interface ServerInfo {
+  /** Agent name (from server connection or persona config) */
+  readonly agentName: string | null;
+  /** Language code (default: 'en') */
+  readonly language: string;
+  /** Server-reported feature flags */
+  readonly features: ServerFeatures | null;
+  /** Pre-configured video library with contextual metadata */
+  readonly videos: readonly ServerVideoAsset[];
+  /** Pre-configured photo library */
+  readonly photos: readonly ServerPhotoAsset[];
+  /** Initial HTML to display on connect */
+  readonly initialHtml: string | null;
+  /** Loading video URL (shown while avatar initializes) */
+  readonly loadingVideoUrl: string | null;
+  /** Raw server configuration object (for advanced use) */
+  readonly raw: Record<string, unknown> | null;
+}
+
 export type AvatarState =
   | 'uninitialized'
   | 'connecting'
@@ -233,6 +292,7 @@ export interface AvatarEventMap {
   'error': AvatarError;
 
   'avatar-speaking-start': void;
+  'avatar-text-ready': AvatarSpeechPayload;
   'avatar-speech': AvatarSpeechPayload;
   'avatar-speaking-end': void;
 
@@ -254,6 +314,12 @@ export interface AvatarEventMap {
 
   'reconnecting': ReconnectingPayload;
   'reconnected': void;
+
+  // Server configuration & lifecycle
+  'server-connected': ServerConnectedPayload;
+  'configured': ConfiguredPayload;
+  'time-warning': TimeWarningPayload;
+  'time-expired': void;
 
   // v1 compatibility
   'showing-agent': void;
@@ -339,10 +405,36 @@ export declare class KalturaAvatarSDK {
   isInConversation(): boolean;
   isAvatarSpeaking(): boolean;
 
+  // ── Server Info ──
+  /** Full server configuration object (available after 'configured' event) */
+  getServerInfo(): ServerInfo;
+  /** Agent name (from server config or persona setting) */
+  getAgentName(): string | null;
+  /** Server-reported feature flags */
+  getFeatures(): ServerFeatures | null;
+  /** Pre-configured video library with contextual metadata from Studio */
+  getVideos(): readonly ServerVideoAsset[];
+  /** Pre-configured photo library from Studio */
+  getPhotos(): readonly ServerPhotoAsset[];
+  /** Loading video URL (shown while avatar initializes) */
+  getLoadingVideoUrl(): string | null;
+
+  // ── Conversation Control ──
+  /** Pause the avatar conversation */
+  pause(): void;
+  /** Resume the avatar conversation */
+  resume(): void;
+
   // ── Microphone ──
   muteMic(): void;
   unmuteMic(): void;
   isMicMuted(): boolean;
+
+  // ── Camera & Screen Capture ──
+  /** Send camera screenshot to avatar for visual analysis */
+  sendCameraCapture(imageDataUrl: string): void;
+  /** Send screen screenshot to avatar for visual analysis */
+  sendScreenCapture(imageDataUrl: string): void;
 
   // ── GenUI Rendering ──
   /** Register or override a renderer for a GenUI type */
@@ -378,6 +470,7 @@ declare const AvatarEvents: {
   readonly STATE_CHANGE: 'state-change';
   readonly ERROR: 'error';
   readonly AVATAR_SPEAKING_START: 'avatar-speaking-start';
+  readonly AVATAR_TEXT_READY: 'avatar-text-ready';
   readonly AVATAR_SPEECH: 'avatar-speech';
   readonly AVATAR_SPEAKING_END: 'avatar-speaking-end';
   readonly USER_SPEECH: 'user-speech';
@@ -395,6 +488,10 @@ declare const AvatarEvents: {
   readonly TRANSCRIPT_ENTRY: 'transcript-entry';
   readonly RECONNECTING: 'reconnecting';
   readonly RECONNECTED: 'reconnected';
+  readonly SERVER_CONNECTED: 'server-connected';
+  readonly CONFIGURED: 'configured';
+  readonly TIME_WARNING: 'time-warning';
+  readonly TIME_EXPIRED: 'time-expired';
   readonly SHOWING_AGENT: 'showing-agent';
   readonly AGENT_TALKED: 'agent-talked';
   readonly USER_TRANSCRIPTION: 'user-transcription';

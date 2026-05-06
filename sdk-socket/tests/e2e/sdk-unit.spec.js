@@ -539,4 +539,112 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     });
     expect(result).toBe(false);
   });
+
+  test('getServerInfo() returns ServerInfo object with null defaults', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const info = sdk.getServerInfo();
+      const r = {
+        agentName: info.agentName,
+        language: info.language,
+        features: info.features,
+        videos: info.videos,
+        photos: info.photos,
+        initialHtml: info.initialHtml,
+        loadingVideoUrl: info.loadingVideoUrl,
+        raw: info.raw
+      };
+      sdk.destroy();
+      return r;
+    });
+    expect(result.agentName).toBeNull();
+    expect(result.language).toBe('en');
+    expect(result.features).toBeNull();
+    expect(result.videos).toEqual([]);
+    expect(result.photos).toEqual([]);
+    expect(result.initialHtml).toBeNull();
+    expect(result.loadingVideoUrl).toBeNull();
+    expect(result.raw).toBeNull();
+  });
+
+  test('getAgentName() returns null before configuration', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const name = sdk.getAgentName();
+      sdk.destroy();
+      return name;
+    });
+    expect(result).toBeNull();
+  });
+
+  test('getFeatures() returns null before configuration', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const f = sdk.getFeatures();
+      sdk.destroy();
+      return f;
+    });
+    expect(result).toBeNull();
+  });
+
+  test('getVideos() returns empty array before configuration', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const v = sdk.getVideos();
+      sdk.destroy();
+      return v;
+    });
+    expect(result).toEqual([]);
+  });
+
+  test('pause() and resume() methods exist', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const hasPause = typeof sdk.pause === 'function';
+      const hasResume = typeof sdk.resume === 'function';
+      sdk.destroy();
+      return { hasPause, hasResume };
+    });
+    expect(result.hasPause).toBe(true);
+    expect(result.hasResume).toBe(true);
+  });
+
+  test('sendCameraCapture() and sendScreenCapture() methods exist', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const hasCamera = typeof sdk.sendCameraCapture === 'function';
+      const hasScreen = typeof sdk.sendScreenCapture === 'function';
+      sdk.destroy();
+      return { hasCamera, hasScreen };
+    });
+    expect(result.hasCamera).toBe(true);
+    expect(result.hasScreen).toBe(true);
+  });
+
+  test('new events are defined in Events object', async () => {
+    const result = await page.evaluate(() => {
+      return {
+        serverConnected: KalturaAvatarSDK.Events.SERVER_CONNECTED,
+        configured: KalturaAvatarSDK.Events.CONFIGURED,
+        timeWarning: KalturaAvatarSDK.Events.TIME_WARNING,
+        timeExpired: KalturaAvatarSDK.Events.TIME_EXPIRED,
+        avatarTextReady: KalturaAvatarSDK.Events.AVATAR_TEXT_READY
+      };
+    });
+    expect(result.serverConnected).toBe('server-connected');
+    expect(result.configured).toBe('configured');
+    expect(result.timeWarning).toBe('time-warning');
+    expect(result.timeExpired).toBe('time-expired');
+    expect(result.avatarTextReady).toBe('avatar-text-ready');
+  });
+
+  test('getLoadingVideoUrl() returns null before server connection', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const url = sdk.getLoadingVideoUrl();
+      sdk.destroy();
+      return url;
+    });
+    expect(result).toBeNull();
+  });
 });

@@ -224,6 +224,25 @@ function doConnect() {
         logEvent('genui', `Interaction: ${interactionType}`);
     });
 
+    sdk.on(KalturaAvatarSDK.Events.SERVER_CONNECTED, ({ agentName, loadingVideoUrl }) => {
+        logEvent('lifecycle', `Server connected — agent: ${agentName || 'unknown'}`);
+    });
+
+    sdk.on(KalturaAvatarSDK.Events.CONFIGURED, (info) => {
+        logEvent('lifecycle', `Configured — ${info.agentName || 'agent'}, ${info.videosCount} videos, lang: ${info.language}`);
+        if (info.features) {
+            logEvent('info', `Features: interruptions=${info.features.interruptions}, pause=${info.features.pause}, screenShare=${info.features.screenShare}`);
+        }
+    });
+
+    sdk.on(KalturaAvatarSDK.Events.TIME_WARNING, ({ remainingSeconds }) => {
+        logEvent('warning', `Time warning: ${remainingSeconds}s remaining`);
+    });
+
+    sdk.on(KalturaAvatarSDK.Events.TIME_EXPIRED, () => {
+        logEvent('warning', 'Session time expired');
+    });
+
     // Start connection
     updateUI('connecting');
     sdk.connect().catch((err) => {

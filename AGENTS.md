@@ -116,6 +116,21 @@ sdk.getTranscriptText(options?: { includeTimestamps?: boolean, format?: 'text'|'
 sdk.downloadTranscript(options?: { filename?: string, format?: 'text'|'markdown'|'json', includeTimestamps?: boolean }): void
 ```
 
+### Server Info & Control
+
+```javascript
+sdk.getServerInfo()        // Full server config (after 'configured' event)
+sdk.getAgentName()         // Agent display name from Studio
+sdk.getFeatures()          // { tapToTalk, interruptions, pause, screenShare, cameraAnalysis, webSearch, smartTurn }
+sdk.getVideos()            // Pre-configured video library with contextual metadata
+sdk.getPhotos()            // Pre-configured photo library
+sdk.getLoadingVideoUrl()   // Loading animation video URL
+sdk.pause()                // Pause the conversation
+sdk.resume()               // Resume the conversation
+sdk.sendCameraCapture(dataUrl)  // Send camera screenshot for avatar analysis
+sdk.sendScreenCapture(dataUrl)  // Send screen screenshot for avatar analysis
+```
+
 ### Events
 
 | Event | Payload | When |
@@ -123,7 +138,8 @@ sdk.downloadTranscript(options?: { filename?: string, format?: 'text'|'markdown'
 | `showing-join-meeting` | — | Pre-join screen appears |
 | `join-meeting-clicked` | — | User clicks join |
 | `showing-agent` | — | Avatar is visible and ready |
-| `agent-talked` | `string \| { agentContent: string }` | Avatar spoke |
+| `avatar-text-ready` | `{ text: string }` | Avatar response ready (before speaking) |
+| `agent-talked` | `string \| { agentContent: string }` | Avatar finished speaking |
 | `user-transcription` | `string \| { userTranscription: string }` | User speech recognized |
 | `pronunciation-score` | `number \| { pronunciationScore: number }` | Pronunciation feedback |
 | `permissions-denied` | — | Mic/camera permissions denied |
@@ -131,6 +147,10 @@ sdk.downloadTranscript(options?: { filename?: string, format?: 'text'|'markdown'
 | `load-agent-error` | — | Failed to load avatar |
 | `stateChange` | `{ from: State, to: State }` | Lifecycle state changed |
 | `error` | `{ message: string }` | Error occurred |
+| `server-connected` | `{ agentName, loadingVideoUrl }` | Server connection established |
+| `configured` | `{ agentName, language, features, videosCount, photosCount, hasInitialHtml }` | Full client config received |
+| `time-warning` | `{ remainingSeconds }` | Session about to expire |
+| `time-expired` | — | Session time limit reached |
 
 ---
 

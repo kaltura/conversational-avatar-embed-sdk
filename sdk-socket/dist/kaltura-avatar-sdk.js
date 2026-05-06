@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.0.0
+ * @version 2.1.0
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.0.0';
+  const VERSION = '2.1.0';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -44,6 +44,7 @@
     ERROR: 'error',
 
     AVATAR_SPEAKING_START: 'avatar-speaking-start',
+    AVATAR_TEXT_READY: 'avatar-text-ready',
     AVATAR_SPEECH: 'avatar-speech',
     AVATAR_SPEAKING_END: 'avatar-speaking-end',
 
@@ -65,6 +66,12 @@
 
     RECONNECTING: 'reconnecting',
     RECONNECTED: 'reconnected',
+
+    // Server configuration & lifecycle
+    SERVER_CONNECTED: 'server-connected',
+    CONFIGURED: 'configured',
+    TIME_WARNING: 'time-warning',
+    TIME_EXPIRED: 'time-expired',
 
     // v1 compatibility aliases
     SHOWING_AGENT: 'showing-agent',
@@ -1756,6 +1763,90 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // SERVER CONFIGURATION STORE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  class ServerInfo {
+    constructor() {
+      this._server = null;
+      this._config = null;
+    }
+
+    _setServer(data) {
+      this._server = Object.freeze({
+        agentName: data?.agentName || null,
+        hostName: data?.hostName || null,
+        loadingVideoUrl: data?.loadingVideoURL || null,
+        finalUrl: data?.finalUrl || null
+      });
+    }
+
+    _setConfig(data) {
+      const cc = data?.clientConfiguration || data || {};
+      this._config = Object.freeze({
+        language: cc.languageCode || 'en',
+        agentPersonaName: cc.agentPersonaName || null,
+        userName: cc.userName || null,
+        isTapToTalk: cc.isTapToTalk || false,
+        interruptionsEnabled: cc.interruptionsEnabled !== false,
+        pauseEnabled: cc.pauseConversationEnabled || false,
+        showTranscription: cc.showTranscription || false,
+        isScreenShareEnabled: cc.isScreenShareEnabled || false,
+        isCameraAnalysisEnabled: cc.isCameraAnalysisEnabled || false,
+        isWebSearchEnabled: cc.isWebSearchEnabled || false,
+        audioMode: cc.audioMode || false,
+        phoneMode: cc.phoneMode || false,
+        forwardLoopMode: cc.forwardLoopMode || false,
+        imaginativeAiMode: cc.imaginativeAiMode || false,
+        initialHtml: cc.initialHtml || null,
+        smartTurn: cc.smartTurnConfig ? Object.freeze({
+          enabled: cc.smartTurnConfig.enabled || false,
+          timeoutMs: cc.smartTurnConfig.timeout_ms || 1500
+        }) : null,
+        videos: Object.freeze((cc.visualVideos || []).map(v => Object.freeze({
+          id: v.id,
+          url: v.url,
+          metadata: Object.freeze(
+            Object.keys(v)
+              .filter(k => k.startsWith('custom-field-'))
+              .reduce((acc, k) => { acc[k] = v[k]; return acc; }, {})
+          )
+        }))),
+        photos: Object.freeze((cc.visualPhotos || []).map(p => Object.freeze({
+          id: p.id,
+          url: p.url,
+          metadata: Object.freeze(
+            Object.keys(p)
+              .filter(k => k.startsWith('custom-field-'))
+              .reduce((acc, k) => { acc[k] = p[k]; return acc; }, {})
+          )
+        }))),
+        raw: Object.freeze(cc)
+      });
+    }
+
+    get agentName() { return this._server?.agentName || this._config?.agentPersonaName || null; }
+    get language() { return this._config?.language || 'en'; }
+    get features() {
+      if (!this._config) return null;
+      return {
+        tapToTalk: this._config.isTapToTalk,
+        interruptions: this._config.interruptionsEnabled,
+        pause: this._config.pauseEnabled,
+        screenShare: this._config.isScreenShareEnabled,
+        cameraAnalysis: this._config.isCameraAnalysisEnabled,
+        webSearch: this._config.isWebSearchEnabled,
+        smartTurn: this._config.smartTurn
+      };
+    }
+    get videos() { return this._config?.videos || []; }
+    get photos() { return this._config?.photos || []; }
+    get initialHtml() { return this._config?.initialHtml || null; }
+    get loadingVideoUrl() { return this._server?.loadingVideoUrl || null; }
+    get raw() { return this._config?.raw || null; }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // MAIN SDK CLASS
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1827,6 +1918,7 @@
       this._audioFallback = new AudioFallback(this._config, this._log);
       this._genui = new GenUIManager(this._emitter, this._config.genui, this._log);
 
+      this._serverInfo = new ServerInfo();
       this._socket = null;
       this._sessionId = null;
       this._roomId = null;
@@ -2020,6 +2112,38 @@
     isInConversation() { return this._state.is(State.IN_CONVERSATION); }
     isAvatarSpeaking() { return this._avatarSpeaking; }
 
+    /** Server-provided configuration and metadata */
+    getServerInfo() { return this._serverInfo; }
+
+    /** Agent name (from server config or persona name) */
+    getAgentName() { return this._serverInfo.agentName; }
+
+    /** Feature flags reported by the server */
+    getFeatures() { return this._serverInfo.features; }
+
+    /** Pre-configured video library with contextual metadata */
+    getVideos() { return this._serverInfo.videos; }
+
+    /** Pre-configured photo library with contextual metadata */
+    getPhotos() { return this._serverInfo.photos; }
+
+    /** Loading video URL (shown while avatar initializes) */
+    getLoadingVideoUrl() { return this._serverInfo.loadingVideoUrl; }
+
+    /** Pause the avatar conversation */
+    pause() {
+      this._state.assertState(State.IN_CONVERSATION);
+      this._socket.emit('pauseConversation', {});
+      this._log.debug('Conversation paused');
+    }
+
+    /** Resume the avatar conversation */
+    resume() {
+      this._state.assertState(State.IN_CONVERSATION);
+      this._socket.emit('resumeConversation', {});
+      this._log.debug('Conversation resumed');
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // MICROPHONE
     // ─────────────────────────────────────────────────────────────────────────
@@ -2027,6 +2151,20 @@
     muteMic() { this._mic.mute(); }
     unmuteMic() { this._mic.unmute(); }
     isMicMuted() { return this._mic.muted; }
+
+    /** Send a screenshot of the user's camera to the avatar for analysis */
+    sendCameraCapture(imageDataUrl) {
+      this._state.assertState(State.IN_CONVERSATION);
+      this._socket.emit('userCameraShot', { image: imageDataUrl });
+      this._log.debug('Camera capture sent');
+    }
+
+    /** Send a screenshot of the user's screen to the avatar for analysis */
+    sendScreenCapture(imageDataUrl) {
+      this._state.assertState(State.IN_CONVERSATION);
+      this._socket.emit('userScreenShareShot', { image: imageDataUrl });
+      this._log.debug('Screen capture sent');
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // GENUI
@@ -2114,6 +2252,11 @@
         // Protocol flow
         this._socket.on('onServerConnected', (data) => {
           this._log.debug('Server connected', data?.agentName);
+          this._serverInfo._setServer(data);
+          this._emitter.emit(Events.SERVER_CONNECTED, {
+            agentName: data?.agentName || null,
+            loadingVideoUrl: data?.loadingVideoURL || null
+          });
           this._socket.emit('setDebugMode', { debugMode: true });
           this._socket.emit('join', {
             client: this._config.clientId,
@@ -2126,6 +2269,22 @@
             isMobile: false
           });
           this._state.transition(State.JOINING);
+        });
+
+        this._socket.on('clientConfiguration', (data) => {
+          this._log.debug('Client configuration received');
+          this._serverInfo._setConfig(data);
+          this._emitter.emit(Events.CONFIGURED, {
+            agentName: this._serverInfo.agentName,
+            language: this._serverInfo.language,
+            features: this._serverInfo.features,
+            videosCount: this._serverInfo.videos.length,
+            photosCount: this._serverInfo.photos.length,
+            hasInitialHtml: !!this._serverInfo.initialHtml
+          });
+          if (this._serverInfo.initialHtml && this._genui.isEnabled()) {
+            this._genui._handleShow('showHtml', { mediaUrl: this._serverInfo.initialHtml });
+          }
         });
 
         this._socket.on('joinComplete', () => {
@@ -2154,6 +2313,12 @@
         });
 
         // Avatar speech
+        this._socket.on('debug_stvTaskGenerated', (data) => {
+          if (data?.text) {
+            this._emitter.emit(Events.AVATAR_TEXT_READY, { text: data.text });
+          }
+        });
+
         this._socket.on('stvStartedTalking', () => {
           this._avatarSpeaking = true;
           this._emitter.emit(Events.AVATAR_SPEAKING_START);
@@ -2202,13 +2367,15 @@
 
         this._socket.on('conversationTimeExpired', () => {
           this._log.warn('Conversation time expired');
+          this._emitter.emit(Events.TIME_EXPIRED);
           this._emitter.emit(Events.ERROR, new AvatarError(ErrorCode.CONVERSATION_TIME_EXPIRED, 'Session time limit reached', { recoverable: false }));
           this._state.transition(State.ENDED);
           this._emitter.emit(Events.CONVERSATION_ENDED);
         });
 
         this._socket.on('conversationTimeWarning', (data) => {
-          this._log.warn('Time warning', data);
+          this._log.warn('Time warning', data?.remainingTime);
+          this._emitter.emit(Events.TIME_WARNING, { remainingSeconds: data?.remainingTime || 0 });
         });
 
         this._socket.on('flowConfigError', (data) => {

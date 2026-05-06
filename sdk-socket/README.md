@@ -300,12 +300,13 @@ sdk.on('ready', () => {
 
 | Event | When It Fires | What You Get |
 |-------|---------------|--------------|
-| `'avatar-speech'` | Avatar finished saying something | `{ text: "Hello! How can I help?" }` |
+| `'avatar-text-ready'` | Avatar's response text is ready (before speaking starts) | `{ text: "Hello! How can I help?" }` |
 | `'avatar-speaking-start'` | Avatar started talking (lips moving) | Nothing |
+| `'avatar-speech'` | Avatar finished saying something | `{ text: "Hello! How can I help?" }` |
 | `'avatar-speaking-end'` | Avatar stopped talking | Nothing |
 | `'user-speech'` | Server recognized what the user said (via mic) | `{ text: "...", isFinal: true/false }` |
 
-**Most important:** `'avatar-speech'` gives you the complete sentence the avatar just said.
+**Most important:** `'avatar-text-ready'` gives you the text *before* the avatar speaks it — use this for real-time subtitles, early command detection, or UI pre-loading. `'avatar-speech'` gives you the same text *after* the avatar finishes speaking.
 
 ```javascript
 sdk.on('avatar-speech', ({ text }) => {
@@ -378,6 +379,32 @@ sdk.on('genui', ({ type, data }) => {
   if (type === 'showHtml') {
     document.getElementById('content').innerHTML = data.html;
   }
+});
+```
+
+### Server Info & Session Events
+
+| Event | When It Fires | What You Get |
+|-------|---------------|--------------|
+| `'server-connected'` | Server connection established (before join) | `{ agentName, loadingVideoUrl }` |
+| `'configured'` | Server sent full client configuration | `{ agentName, language, features, videosCount, photosCount, hasInitialHtml }` |
+| `'time-warning'` | Session is about to expire | `{ remainingSeconds: 10 }` |
+| `'time-expired'` | Session time limit reached | Nothing |
+
+**Most important:** `'configured'` gives you access to the agent's video/photo library, feature flags, and initial HTML configured in Kaltura Studio.
+
+```javascript
+sdk.on('configured', (info) => {
+  console.log(`Agent: ${info.agentName}, ${info.videosCount} videos available`);
+  
+  // Access the full server info anytime after this event
+  const serverInfo = sdk.getServerInfo();
+  console.log('Features:', serverInfo.features);
+  console.log('Videos:', serverInfo.videos);
+});
+
+sdk.on('time-warning', ({ remainingSeconds }) => {
+  showToast(`Session ending in ${remainingSeconds} seconds`);
 });
 ```
 
@@ -490,6 +517,46 @@ sdk.setTranscriptEnabled(false);
 sdk.muteMic();       // Mute your microphone
 sdk.unmuteMic();     // Unmute
 sdk.isMicMuted();    // → true or false
+```
+
+### Conversation Control
+
+```javascript
+sdk.pause();    // Pause the avatar (stops listening/speaking)
+sdk.resume();   // Resume the conversation
+```
+
+### Camera & Screen Capture
+
+Send visual context to the avatar for analysis (when enabled in Studio):
+
+```javascript
+// Send a camera snapshot
+const canvas = document.createElement('canvas');
+const ctx = canvas.getContext('2d');
+ctx.drawImage(videoElement, 0, 0);
+sdk.sendCameraCapture(canvas.toDataURL('image/jpeg'));
+
+// Send a screen capture
+sdk.sendScreenCapture(screenshotDataUrl);
+```
+
+### Server Info
+
+Access server-provided configuration (available after the `'configured'` event):
+
+```javascript
+sdk.getAgentName();       // Agent's display name from Studio
+sdk.getFeatures();        // { tapToTalk, interruptions, pause, screenShare, cameraAnalysis, webSearch, smartTurn }
+sdk.getVideos();          // Pre-configured video library with metadata
+sdk.getPhotos();          // Pre-configured photo library
+sdk.getLoadingVideoUrl(); // Loading animation video URL
+sdk.getServerInfo();      // Full ServerInfo object (all of the above + raw config)
+
+// Example: list available contextual videos
+sdk.getVideos().forEach(v => {
+  console.log(v.id, v.url, v.metadata);
+});
 ```
 
 ### Checking State
