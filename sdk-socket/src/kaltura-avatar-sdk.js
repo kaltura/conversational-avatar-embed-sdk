@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.3.1
+ * @version 2.3.2
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.3.1';
+  const VERSION = '2.3.2';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -2362,8 +2362,6 @@
         });
 
         this._socket.on('stvStartedTalking', () => {
-          _beforeBuffer = '';
-          this._commands.resetUtterance();
           this._avatarSpeaking = true;
           this._emitter.emit(Events.AVATAR_SPEAKING_START);
         });
