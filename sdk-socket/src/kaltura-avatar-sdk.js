@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.3.2
+ * @version 2.3.3
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.3.2';
+  const VERSION = '2.3.3';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -2485,12 +2485,20 @@
           videoElement: videoEl
         });
 
-        // Don't block approvedPermissions on video — approve as soon as WHEP negotiation
-        // completes (answer set). Audio+video tracks will arrive shortly after.
-        this._videoReady = true;
-        this._checkApprovePermissions();
+        // Wait for video track to actually arrive before approving permissions.
+        // This ensures avatar intro speech doesn't start before video is visible.
+        const videoTimeout = setTimeout(() => {
+          if (!this._videoReady) {
+            this._log.warn('Video track timeout — approving permissions without video');
+            this._videoReady = true;
+            this._checkApprovePermissions();
+          }
+        }, 5000);
 
         trackPromise.then(() => {
+          clearTimeout(videoTimeout);
+          this._videoReady = true;
+          this._checkApprovePermissions();
           this._emitter.emit(Events.VIDEO_READY, { element: this._videoElement });
         });
       } catch (err) {
