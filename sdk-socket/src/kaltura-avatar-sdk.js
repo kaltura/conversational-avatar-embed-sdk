@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.3.3
+ * @version 2.3.4
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.3.3';
+  const VERSION = '2.3.4';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -2485,8 +2485,8 @@
           videoElement: videoEl
         });
 
-        // Wait for video track to actually arrive before approving permissions.
-        // This ensures avatar intro speech doesn't start before video is visible.
+        // Wait for video track to arrive, decode a frame, and allow the WebRTC
+        // jitter buffer to stabilize before telling the server to start speaking.
         const videoTimeout = setTimeout(() => {
           if (!this._videoReady) {
             this._log.warn('Video track timeout — approving permissions without video');
@@ -2497,9 +2497,27 @@
 
         trackPromise.then(() => {
           clearTimeout(videoTimeout);
-          this._videoReady = true;
-          this._checkApprovePermissions();
           this._emitter.emit(Events.VIDEO_READY, { element: this._videoElement });
+
+          // Wait for first decoded frame + jitter buffer stabilization
+          const approve = () => {
+            setTimeout(() => {
+              this._videoReady = true;
+              this._checkApprovePermissions();
+            }, 300);
+          };
+
+          const ve = this._videoElement;
+          if (ve && ve.readyState < 3) {
+            // HAVE_FUTURE_DATA (3) = enough data to play without stalling
+            ve.addEventListener('canplay', approve, { once: true });
+            // Safety: if canplay never fires, approve after 2s
+            setTimeout(() => {
+              if (!this._videoReady) approve();
+            }, 2000);
+          } else {
+            approve();
+          }
         });
       } catch (err) {
         this._log.warn('WHEP failed, falling back to audio', err.message);
