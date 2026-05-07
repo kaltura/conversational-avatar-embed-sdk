@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.2.3
+ * @version 2.3.0
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
