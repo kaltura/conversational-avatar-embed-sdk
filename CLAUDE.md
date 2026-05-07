@@ -11,13 +11,27 @@ This repository provides two SDKs for embedding Kaltura AI Avatars into web appl
 
 Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowledge Base, same server-side AI.
 
+## Before Modifying the Socket SDK
+
+**Read first:**
+- `sdk-socket/ARCHITECTURE.md` — class map, connection flow, event pipeline, gotchas
+- `CONTRIBUTING.md` — code standards, testing, release process
+
+**Key constraints:**
+- Single UMD file, no build step, no bundler, no imports
+- After editing `src/`, always copy to `dist/`
+- Always run `cd sdk-socket && npm test` before committing
+- Never delete/recreate git tags (jsDelivr caches permanently per version)
+- Version must be synced in 3 places: `@version` header, `const VERSION`, `package.json`
+
 ## Socket SDK (full control)
 
 - Source: `sdk-socket/src/kaltura-avatar-sdk.js`
 - Dist: `sdk-socket/dist/kaltura-avatar-sdk.js`
 - Types: `sdk-socket/dist/kaltura-avatar-sdk.d.ts`
+- Architecture: `sdk-socket/ARCHITECTURE.md`
 - Demo: `sdk-socket/examples/demo/index.html`
-- Tests: `sdk-socket/tests/e2e/` (125 tests via Playwright)
+- Tests: `sdk-socket/tests/e2e/` (146 tests via Playwright)
 - Peer dependency: Socket.IO client v4
 
 ### Key Socket SDK Patterns
@@ -25,16 +39,17 @@ Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowle
 1. **Connect**: `await sdk.connect()` (no iframe, direct socket)
 2. **Events**: `sdk.on('avatar-speech', ...)`, `sdk.on('user-speech', ...)`
 3. **DPP**: `sdk.injectDPP(data)` — accepts object or string, works any time after connect
-4. **Commands**: `sdk.registerCommand(name, pattern, handler)`
+4. **Commands**: `sdk.registerCommand(name, pattern, handler, { timing })` — before/after/both
 5. **GenUI**: Built-in renderers for charts, tables, videos, code, diagrams, etc.
 6. **Transcript**: `sdk.getTranscript()`, `sdk.downloadTranscript()`
+7. **Contact**: `sdk.submitContact(type, value)` / `sdk.rejectContact(type)` — must call one or avatar hangs
 
 ### Running Socket SDK Tests
 
 ```bash
 cd sdk-socket
 npm install
-npm test          # 125 unit + GenUI tests (~2s)
+npm test          # 146 unit + GenUI tests (~2.5s)
 npm run test:all  # All including live integration
 ```
 
@@ -68,3 +83,12 @@ npm run test:iframe             # Iframe SDK E2E tests
 ```
 
 Demos run on any static server: `python3 -m http.server 8080`
+
+## Release Process
+
+See `CONTRIBUTING.md` for the full checklist. The critical points:
+1. Sync 3 version strings
+2. Copy src → dist
+3. Tests pass
+4. Commit, push, `gh release create vX.Y.Z`
+5. Wait 10 min, purge jsDelivr, verify `x-jsd-version` header
