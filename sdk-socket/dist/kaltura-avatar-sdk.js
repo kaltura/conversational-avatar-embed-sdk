@@ -2000,9 +2000,6 @@
       this._emitter.emit(Events.CONNECTING);
       this._resetInternalState();
 
-      // Pre-acquire mic in parallel with socket connection (saves ~2-3s)
-      this._preAcquireMic();
-
       this._stickyId = generateId(8) + generateId(8);
       this._roomId = generateId(8);
 
@@ -2332,6 +2329,7 @@
         this._socket.on('joinComplete', () => {
           this._log.debug('Join complete');
           this._state.transition(State.JOINED);
+          this._preAcquireMic();
           this._socket.emit('stvNewSession', { room_id: this._roomId, cast_mode: 'webrtc' });
         });
 
