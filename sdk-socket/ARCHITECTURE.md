@@ -26,26 +26,26 @@ sdk-socket/
 
 All classes are defined inside the UMD factory function (not exported individually). The public API is `KalturaAvatarSDK` only.
 
-| Line | Class | Responsibility |
-|------|-------|----------------|
-| ~182 | `AvatarError` | Typed error with code, recoverable flag, context |
-| ~224 | `Logger` | Prefixed console logging with debug toggle |
-| ~259 | `TypedEventEmitter` | Pub/sub with wildcard, once, off |
-| ~340 | `StateMachine` | State transitions with validation and history |
-| ~391 | `ReconnectStrategy` | Exponential backoff with jitter |
-| ~430 | `TranscriptManager` | Records speech, formats, exports |
-| ~493 | `CommandRegistry` | Pattern-matching on avatar speech with timing control |
-| ~546 | `DPPManager` | Validates and emits Dynamic Prompt Injection |
-| ~595 | `MicrophoneManager` | getUserMedia wrapper with mute/unmute |
-| ~638 | `WHEPClient` | WebRTC-HTTP Egress Protocol for avatar video |
-| ~774 | `ASRConnection` | WebRTC send-only for user audio (speech recognition) |
-| ~951 | `AudioFallback` | Socket.IO binary audio when WHEP fails |
-| ~1031 | `LibraryLoader` | Lazy CDN loading for Chart.js, Mermaid, KaTeX, CodeMirror |
-| ~1108 | `RendererRegistry` | Plugin storage + middleware chain for GenUI |
-| ~1180 | `GenUIContainer` | DOM layers (board overlay + visual panel) |
-| ~1634 | `GenUIManager` | Orchestrator: socket events → renderer dispatch |
-| ~1806 | `ServerInfo` | Parses and stores server configuration |
-| ~1890 | `KalturaAvatarSDK` | Public API class (facade over all above) |
+| Class | Responsibility |
+|-------|----------------|
+| `AvatarError` | Typed error with code, recoverable flag, context |
+| `Logger` | Prefixed console logging with debug toggle |
+| `TypedEventEmitter` | Pub/sub with wildcard, once, off |
+| `StateMachine` | State transitions with validation and history |
+| `ReconnectStrategy` | Exponential backoff with jitter |
+| `TranscriptManager` | Records speech, formats, exports |
+| `CommandRegistry` | Pattern-matching on avatar speech with timing control |
+| `DPPManager` | Validates and emits Dynamic Prompt Injection |
+| `MicrophoneManager` | getUserMedia wrapper with mute/unmute |
+| `WHEPClient` | WebRTC-HTTP Egress Protocol for avatar video |
+| `ASRConnection` | WebRTC send-only for user audio (speech recognition) |
+| `AudioFallback` | Socket.IO binary audio when WHEP fails |
+| `LibraryLoader` | Lazy CDN loading for Chart.js, Mermaid, KaTeX, CodeMirror |
+| `RendererRegistry` | Plugin storage + middleware chain for GenUI |
+| `GenUIContainer` | DOM layers (board overlay + visual panel) |
+| `GenUIManager` | Orchestrator: socket events → renderer dispatch |
+| `ServerInfo` | Parses and stores server configuration |
+| `KalturaAvatarSDK` | Public API class (facade over all above) |
 
 ---
 
@@ -213,7 +213,7 @@ Two separate WebRTC connections:
 
 ### Adding a new event
 
-1. Add to the `Events` object (line ~37)
+1. Add to the `Events` object at the top of the file
 2. Emit it at the appropriate point: `this._emitter.emit(Events.YOUR_EVENT, payload)`
 3. Add to `dist/kaltura-avatar-sdk.d.ts` in the `AvatarEventMap` interface
 4. Add to the Events Reference table in `README.md`
@@ -221,7 +221,7 @@ Two separate WebRTC connections:
 
 ### Adding a new socket handler
 
-1. Add in `_initSocket()` (line ~2241)
+1. Add in `_initSocket()`
 2. Follow the pattern: `this._socket.on('eventName', (data) => { ... })`
 3. Validate incoming data before processing
 4. Emit the appropriate public event
@@ -237,7 +237,7 @@ Two separate WebRTC connections:
 
 ### Adding a new public API method
 
-1. Add the method to the `KalturaAvatarSDK` class (line ~1890)
+1. Add the method to the `KalturaAvatarSDK` class
 2. Add TypeScript declaration in `dist/kaltura-avatar-sdk.d.ts`
 3. Add to the appropriate section of `README.md`
 4. Add a test verifying the method exists and works
@@ -266,8 +266,8 @@ Test structure:
 ## Release Process
 
 1. Sync all version strings:
-   - `@version` JSDoc header (line 6)
-   - `const VERSION` (line 23)
+   - `@version` JSDoc header (top of file)
+   - `const VERSION` constant (near top of file)
    - `sdk-socket/package.json` → `version` field
 2. `cp src/kaltura-avatar-sdk.js dist/kaltura-avatar-sdk.js`
 3. Run `npm test` — all must pass
