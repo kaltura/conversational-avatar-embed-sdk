@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.2.5';
+  const VERSION = '2.3.0';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -502,7 +502,7 @@
         ? (text) => pattern.test(text)
         : (text) => text.toLowerCase().includes(pattern.toLowerCase());
 
-      this._commands.set(name, { pattern, matcher, handler, timing, _firedTexts: new Set() });
+      this._commands.set(name, { pattern, matcher, handler, timing, _firedThisUtterance: false });
       return () => this._commands.delete(name);
     }
 
@@ -511,17 +511,9 @@
       for (const [name, cmd] of this._commands) {
         const shouldFire = cmd.timing === 'both' || cmd.timing === phase;
         if (!shouldFire) continue;
+        if (cmd._firedThisUtterance) continue;
         if (!cmd.matcher(text)) continue;
-        // For 'both' timing, prevent double-fire for the same text
-        if (cmd.timing === 'both') {
-          if (cmd._firedTexts.has(text)) continue;
-          cmd._firedTexts.add(text);
-          // Keep set bounded
-          if (cmd._firedTexts.size > 50) {
-            const first = cmd._firedTexts.values().next().value;
-            cmd._firedTexts.delete(first);
-          }
-        }
+        cmd._firedThisUtterance = true;
         const match = { command: name, text, pattern: cmd.pattern, timing: phase };
         try {
           cmd.handler(match);
@@ -529,6 +521,12 @@
           console.error(`Command handler error [${name}]:`, e);
         }
         this._emitter.emit(Events.COMMAND_MATCHED, match);
+      }
+    }
+
+    resetUtterance() {
+      for (const cmd of this._commands.values()) {
+        cmd._firedThisUtterance = false;
       }
     }
 
@@ -2353,19 +2351,26 @@
         });
 
         // Avatar speech
+        let _beforeBuffer = '';
+
         this._socket.on('debug_stvTaskGenerated', (data) => {
           if (data?.text) {
-            this._commands.check(data.text, 'before');
-            this._emitter.emit(Events.AVATAR_TEXT_READY, { text: data.text });
+            _beforeBuffer += data.text;
+            this._commands.check(_beforeBuffer, 'before');
+            this._emitter.emit(Events.AVATAR_TEXT_READY, { text: data.text, fullText: _beforeBuffer });
           }
         });
 
         this._socket.on('stvStartedTalking', () => {
+          _beforeBuffer = '';
+          this._commands.resetUtterance();
           this._avatarSpeaking = true;
           this._emitter.emit(Events.AVATAR_SPEAKING_START);
         });
 
         this._socket.on('stvFinishedTalking', (data) => {
+          _beforeBuffer = '';
+          this._commands.resetUtterance();
           this._avatarSpeaking = false;
           this._emitter.emit(Events.AVATAR_SPEAKING_END);
           if (data?.agentContent) {

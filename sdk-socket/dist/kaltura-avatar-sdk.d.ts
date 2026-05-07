@@ -107,6 +107,13 @@ export interface AvatarSpeechPayload {
   text: string;
 }
 
+export interface AvatarTextReadyPayload {
+  /** The current chunk of text */
+  text: string;
+  /** Full accumulated text for this utterance so far */
+  fullText: string;
+}
+
 export interface UserSpeechPayload {
   text: string;
   isFinal: boolean;
@@ -307,7 +314,7 @@ export interface AvatarEventMap {
   'error': AvatarError;
 
   'avatar-speaking-start': void;
-  'avatar-text-ready': AvatarSpeechPayload;
+  'avatar-text-ready': AvatarTextReadyPayload;
   'avatar-speech': AvatarSpeechPayload;
   'avatar-speaking-end': void;
 

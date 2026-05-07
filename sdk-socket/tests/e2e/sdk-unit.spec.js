@@ -350,7 +350,7 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     expect(result).toBe(1);
   });
 
-  test('command timing: "both" fires again for different text', async () => {
+  test('command timing: "both" fires again after resetUtterance', async () => {
     const result = await page.evaluate(() => {
       const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
       const emitter = new TypedEventEmitter();
@@ -359,6 +359,7 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
       cr.register('score', 'score is', () => { count++; }, { timing: 'both' });
       cr.check('your score is 95', 'before');
       cr.check('your score is 95', 'after');
+      cr.resetUtterance();
       cr.check('your score is 80', 'before');
       return count;
     });
@@ -391,6 +392,65 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     });
     expect(result.timing).toBe('before');
     expect(result.command).toBe('nav');
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // COMMAND BUFFERING (chunked text)
+  // ────────────────────────────────────────────────────────────────────
+
+  test('command matches across buffered chunks', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let matched = null;
+      cr.register('end', 'ending call now', (m) => { matched = m; }, { timing: 'before' });
+      let buffer = '';
+      buffer += 'Thank you! ';
+      cr.check(buffer, 'before');
+      buffer += 'Ending call ';
+      cr.check(buffer, 'before');
+      buffer += 'now.';
+      cr.check(buffer, 'before');
+      return matched;
+    });
+    expect(result).not.toBeNull();
+    expect(result.command).toBe('end');
+    expect(result.text).toContain('Ending call now.');
+  });
+
+  test('command fires only once per utterance despite growing buffer', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let count = 0;
+      cr.register('end', 'ending call', (m) => { count++; }, { timing: 'before' });
+      let buffer = '';
+      buffer += 'Ending call ';
+      cr.check(buffer, 'before');
+      buffer += 'now. ';
+      cr.check(buffer, 'before');
+      buffer += 'Goodbye!';
+      cr.check(buffer, 'before');
+      return count;
+    });
+    expect(result).toBe(1);
+  });
+
+  test('resetUtterance allows command to fire again on next utterance', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let count = 0;
+      cr.register('end', 'ending call', (m) => { count++; }, { timing: 'before' });
+      cr.check('Ending call now.', 'before');
+      cr.resetUtterance();
+      cr.check('Ending call now.', 'before');
+      return count;
+    });
+    expect(result).toBe(2);
   });
 
   // ────────────────────────────────────────────────────────────────────
