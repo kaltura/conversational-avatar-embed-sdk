@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.3.5
+ * @version 2.3.6
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.3.5';
+  const VERSION = '2.3.6';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -2173,6 +2173,7 @@
     /** Pause the avatar conversation */
     pause() {
       this._state.assertState(State.IN_CONVERSATION);
+      this._mic.mute();
       this._socket.emit('pauseConversation', {});
       this._log.debug('Conversation paused');
     }
@@ -2180,6 +2181,7 @@
     /** Resume the avatar conversation */
     resume() {
       this._state.assertState(State.IN_CONVERSATION);
+      this._mic.unmute();
       this._socket.emit('resumeConversation', {});
       this._log.debug('Conversation resumed');
     }

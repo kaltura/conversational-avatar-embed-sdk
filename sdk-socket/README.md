@@ -572,8 +572,18 @@ sdk.isMicMuted();    // → true or false
 ### Conversation Control
 
 ```javascript
-sdk.pause();    // Pause the avatar (stops listening/speaking)
-sdk.resume();   // Resume the conversation
+sdk.pause();    // Pause: mutes mic + tells server to stop (avatar goes idle)
+sdk.resume();   // Resume: unmutes mic + tells server to continue
+```
+
+`pause()` mutes the microphone AND emits `pauseConversation` to the server. The avatar stops listening and stops generating responses. `resume()` does the reverse. This matches the production app's pause button behavior.
+
+For mic-only control (without pausing the conversation flow):
+
+```javascript
+sdk.muteMic();       // Stop sending audio (avatar may still speak)
+sdk.unmuteMic();     // Resume sending audio
+sdk.isMicMuted();    // Check current state
 ```
 
 ### Contact Collection
@@ -658,6 +668,22 @@ sdk.getSessionId();      // WebRTC session ID (for debugging)
 sdk.getVideoElement();   // The <video> DOM element
 sdk.getMicStream();      // The MediaStream from getUserMedia
 ```
+
+---
+
+## Conversation Memory
+
+The avatar automatically remembers prior conversations with the same user. This is entirely server-side — no client API needed.
+
+**How it works:** The server associates conversations with the `clientId` + `flowId` combination. When the same user reconnects, the avatar recalls previous interactions and can reference them naturally.
+
+**Key points:**
+- Memory is automatic — no setup required
+- Keyed by `clientId` + `flowId` (same user + same avatar = memory)
+- No client-side storage (not localStorage, not cookies)
+- No events fired when memory is loaded — the avatar just "knows"
+- No API to read, clear, or manipulate memory from the client
+- To create a "fresh" session with no memory, use a different `clientId`
 
 ---
 
