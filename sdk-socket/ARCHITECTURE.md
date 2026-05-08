@@ -136,6 +136,32 @@ Server → 'stvFinishedTalking' { agentContent: fullText }
 
 ---
 
+## Event Pipeline (User Speech)
+
+```
+Server → 'userStartedTalking' (server-side VAD onset)
+       │
+       ▼
+  _userSpeaking = true
+  Emit USER_SPEAKING_START
+
+Server → 'debug_vad_speech_detected' (interim ASR, streaming)
+       │
+       ▼
+  Emit USER_SPEECH { text, isFinal: false }
+
+Server → 'agentTurnToTalk' { userTranscription } (turn complete)
+       │
+       ▼
+  _userSpeaking = false
+  Emit USER_SPEECH { text, isFinal: true }
+  TranscriptManager.add('User', text)
+```
+
+**Key:** `userStartedTalking` is a non-debug event — it fires without debug mode. The `debug_vad_speech_detected` interim transcripts require `setDebugMode: { debugMode: true }` (the SDK enables this automatically).
+
+---
+
 ## GenUI Rendering Pipeline
 
 ```

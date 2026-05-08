@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.3.4
+ * @version 2.3.5
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.3.4';
+  const VERSION = '2.3.5';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -49,6 +49,7 @@
     AVATAR_SPEAKING_END: 'avatar-speaking-end',
 
     USER_SPEECH: 'user-speech',
+    USER_SPEAKING_START: 'user-speaking-start',
 
     VIDEO_READY: 'video-ready',
     AUDIO_FALLBACK: 'audio-fallback',
@@ -1969,6 +1970,7 @@
       this._videoElement = null;
       this._audioElement = null;
       this._avatarSpeaking = false;
+      this._userSpeaking = false;
       this._intentionalDisconnect = false;
 
       this._setupContainer();
@@ -2148,6 +2150,7 @@
     isConnected() { return this._state.is(State.CONNECTED, State.JOINING, State.JOINED, State.IN_CONVERSATION); }
     isInConversation() { return this._state.is(State.IN_CONVERSATION); }
     isAvatarSpeaking() { return this._avatarSpeaking; }
+    isUserSpeaking() { return this._userSpeaking; }
 
     /** Server-provided configuration and metadata */
     getServerInfo() { return this._serverInfo; }
@@ -2380,6 +2383,12 @@
           }
         });
 
+        // User started speaking (server-side VAD detection)
+        this._socket.on('userStartedTalking', () => {
+          this._userSpeaking = true;
+          this._emitter.emit(Events.USER_SPEAKING_START);
+        });
+
         // User speech (via server ASR) — interim/partial only
         this._socket.on('debug_vad_speech_detected', (data) => {
           if (data?.transcript && data.segmentType !== 'final') {
@@ -2390,6 +2399,7 @@
 
         // User speech confirmed (server acknowledged user's turn)
         this._socket.on('agentTurnToTalk', (data) => {
+          this._userSpeaking = false;
           if (data?.userTranscription) {
             this._emitter.emit(Events.USER_SPEECH, { text: data.userTranscription, isFinal: true });
             this._emitter.emit(Events.USER_TRANSCRIPTION, { userTranscription: data.userTranscription });
@@ -2668,6 +2678,7 @@
       this._permissionsApproved = false;
       this._sessionId = null;
       this._avatarSpeaking = false;
+      this._userSpeaking = false;
     }
 
     _cleanupConnection() {

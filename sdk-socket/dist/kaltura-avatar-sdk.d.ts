@@ -319,6 +319,7 @@ export interface AvatarEventMap {
   'avatar-speaking-end': void;
 
   'user-speech': UserSpeechPayload;
+  'user-speaking-start': void;
 
   'video-ready': { element: HTMLVideoElement };
   'audio-fallback': void;
@@ -426,6 +427,7 @@ export declare class KalturaAvatarSDK {
   isConnected(): boolean;
   isInConversation(): boolean;
   isAvatarSpeaking(): boolean;
+  isUserSpeaking(): boolean;
 
   // ── Server Info ──
   /** Full server configuration object (available after 'configured' event) */
@@ -496,6 +498,7 @@ declare const AvatarEvents: {
   readonly AVATAR_SPEECH: 'avatar-speech';
   readonly AVATAR_SPEAKING_END: 'avatar-speaking-end';
   readonly USER_SPEECH: 'user-speech';
+  readonly USER_SPEAKING_START: 'user-speaking-start';
   readonly VIDEO_READY: 'video-ready';
   readonly AUDIO_FALLBACK: 'audio-fallback';
   readonly MIC_GRANTED: 'mic-granted';

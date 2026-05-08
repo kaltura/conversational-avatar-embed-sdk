@@ -106,6 +106,7 @@
             <div id="avatar-container"></div>
             <div class="status-badge" id="status-badge" style="display:none">
                 <span><span class="dot gray" id="dot-state"></span><span id="lbl-state">—</span></span>
+                <span id="vad-indicator" style="display:none"><span class="dot green"></span>User speaking</span>
             </div>
         </div>
         <div class="chat-input">
@@ -203,7 +204,13 @@ function doConnect() {
 
     sdk.on(KalturaAvatarSDK.Events.USER_SPEECH, ({ text, isFinal }) => {
         if (!isFinal) return;
+        document.getElementById('vad-indicator').style.display = 'none';
         addBubble('user', text);
+    });
+
+    sdk.on(KalturaAvatarSDK.Events.USER_SPEAKING_START, () => {
+        document.getElementById('vad-indicator').style.display = '';
+        logEvent('vad', 'User started speaking');
     });
 
     sdk.on(KalturaAvatarSDK.Events.DISCONNECTED, () => {

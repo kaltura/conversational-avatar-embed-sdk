@@ -304,9 +304,10 @@ sdk.on('ready', () => {
 | `'avatar-speaking-start'` | Avatar started talking (lips moving) | Nothing |
 | `'avatar-speech'` | Avatar finished saying something | `{ text: "Hello! How can I help?" }` |
 | `'avatar-speaking-end'` | Avatar stopped talking | Nothing |
+| `'user-speaking-start'` | Server VAD detected user started speaking | Nothing |
 | `'user-speech'` | Server recognized what the user said (via mic) | `{ text: "...", isFinal: true/false }` |
 
-**Most important:** `'avatar-text-ready'` gives you the text *before* the avatar speaks it — use this for real-time subtitles, early command detection, or UI pre-loading. `'avatar-speech'` gives you the same text *after* the avatar finishes speaking.
+**Most important:** `'avatar-text-ready'` gives you the text *before* the avatar speaks it — use this for real-time subtitles, early command detection, or UI pre-loading. `'avatar-speech'` gives you the same text *after* the avatar finishes speaking. `'user-speaking-start'` fires the instant the server's VAD detects voice — use it for UI indicators ("user is talking") before transcription arrives.
 
 ```javascript
 sdk.on('avatar-speech', ({ text }) => {
@@ -317,6 +318,11 @@ sdk.on('user-speech', ({ text, isFinal }) => {
   if (isFinal) {
     document.getElementById('chat').innerHTML += `<p>You: ${text}</p>`;
   }
+});
+
+// Show a "listening" indicator as soon as the user starts speaking
+sdk.on('user-speaking-start', () => {
+  document.getElementById('status').textContent = 'Listening...';
 });
 ```
 
@@ -647,6 +653,7 @@ sdk.getState();          // 'uninitialized', 'connecting', 'in-conversation', et
 sdk.isConnected();       // true/false
 sdk.isInConversation();  // true/false  
 sdk.isAvatarSpeaking();  // true while avatar is talking
+sdk.isUserSpeaking();    // true while user is talking (server VAD)
 sdk.getSessionId();      // WebRTC session ID (for debugging)
 sdk.getVideoElement();   // The <video> DOM element
 sdk.getMicStream();      // The MediaStream from getUserMedia

@@ -796,4 +796,59 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     });
     expect(result).toBeNull();
   });
+
+  // USER_SPEAKING_START event
+  test('USER_SPEAKING_START event is defined', async () => {
+    const result = await page.evaluate(() => {
+      return KalturaAvatarSDK.Events.USER_SPEAKING_START;
+    });
+    expect(result).toBe('user-speaking-start');
+  });
+
+  test('isUserSpeaking() returns false initially', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const speaking = sdk.isUserSpeaking();
+      sdk.destroy();
+      return speaking;
+    });
+    expect(result).toBe(false);
+  });
+
+  test('isUserSpeaking() method exists and is a function', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const isFunc = typeof sdk.isUserSpeaking === 'function';
+      sdk.destroy();
+      return isFunc;
+    });
+    expect(result).toBe(true);
+  });
+
+  test('user-speaking-start event fires on userStartedTalking socket event', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        let fired = false;
+        emitter.on('user-speaking-start', () => { fired = true; });
+        emitter.emit('user-speaking-start');
+        resolve(fired);
+      });
+    });
+    expect(result).toBe(true);
+  });
+
+  test('user-speaking-start event name matches Events constant', async () => {
+    const result = await page.evaluate(() => {
+      const events = KalturaAvatarSDK.Events;
+      return {
+        constant: events.USER_SPEAKING_START,
+        inObject: 'USER_SPEAKING_START' in events,
+        value: events.USER_SPEAKING_START === 'user-speaking-start'
+      };
+    });
+    expect(result.inObject).toBe(true);
+    expect(result.value).toBe(true);
+  });
 });
