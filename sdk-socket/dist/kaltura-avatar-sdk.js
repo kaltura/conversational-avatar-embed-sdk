@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.3.6
+ * @version 2.3.7
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.3.6';
+  const VERSION = '2.3.7';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -647,6 +647,7 @@
 
     get peerConnection() { return this._pc; }
     get videoElement() { return this._videoElement; }
+    set onConnectionLost(fn) { this._onConnectionLost = fn; }
 
     _buildIceServers() {
       const turn = this._config.turn?.urls || [
@@ -698,6 +699,15 @@
           }
         };
       });
+
+      this._pc.oniceconnectionstatechange = () => {
+        const state = this._pc?.iceConnectionState;
+        this._log.debug('WHEP ICE state:', state);
+        if (state === 'failed' || state === 'disconnected') {
+          this._log.warn('WHEP connection lost — video stream may be stale');
+          if (this._onConnectionLost) this._onConnectionLost(state);
+        }
+      };
 
       const offer = await this._pc.createOffer();
       await this._pc.setLocalDescription(offer);
@@ -2493,6 +2503,13 @@
         const videoEl = this._videoElement || this._config.media.videoElement;
         if (videoEl) this._whep.setVideoElement(videoEl);
 
+        this._whep.onConnectionLost = (state) => {
+          if (this._state.is(State.IN_CONVERSATION)) {
+            this._log.warn('WHEP connection lost during conversation — re-negotiating video');
+            this._renegotiateVideo();
+          }
+        };
+
         const { trackPromise } = await this._whep.negotiate(this._sessionId, {
           videoElement: videoEl
         });
@@ -2545,6 +2562,33 @@
         this._videoReady = true;
         this._checkApprovePermissions();
       });
+    }
+
+    async _renegotiateVideo() {
+      try {
+        this._whep.close();
+        const videoEl = this._videoElement || this._config.media.videoElement;
+        if (videoEl) this._whep.setVideoElement(videoEl);
+
+        this._whep.onConnectionLost = (state) => {
+          if (this._state.is(State.IN_CONVERSATION)) {
+            this._log.warn('WHEP connection lost again — re-negotiating');
+            this._renegotiateVideo();
+          }
+        };
+
+        const { trackPromise } = await this._whep.negotiate(this._sessionId, {
+          videoElement: videoEl
+        });
+
+        trackPromise.then(() => {
+          this._log.info('WHEP re-negotiation successful — video restored');
+          this._emitter.emit(Events.VIDEO_READY, { element: this._videoElement });
+        });
+      } catch (err) {
+        this._log.warn('WHEP re-negotiation failed', err.message);
+        this._emitter.emit(Events.AUDIO_FALLBACK);
+      }
     }
 
     _preAcquireMic() {
