@@ -541,6 +541,26 @@ sdk.registerCommand('score', /score is \d+/, (match) => {
 
 The `match` object includes a `timing` field indicating which phase triggered it (`'before'` or `'after'`).
 
+#### Command Debounce
+
+When using `timing: 'before'`, the avatar's text arrives in chunks. A command may match on the first chunk before the full sentence has arrived — for example, "Navigating to slide t" (where "t" is just the start of "twenty-seven").
+
+Use `debounce` to wait for more chunks before firing:
+
+```javascript
+// Wait 150ms after the last chunk before firing — gets complete text
+sdk.registerCommand('navigate-slide', 'navigating to slide', (match) => {
+  const slideNum = parseSlideNumber(match.text); // full sentence available
+  goToSlide(slideNum);
+}, { timing: 'before', debounce: 150 });
+```
+
+**How it works:** When the pattern matches, the SDK waits `debounce` ms. If more chunks arrive, the timer resets. The handler fires with the latest accumulated text once chunks stop arriving. If the utterance ends (`stvFinishedTalking`) before the timer fires, the command flushes immediately with whatever text is available.
+
+**When to use:**
+- `debounce: 0` (default) — fire immediately on match. Use for end-of-sentence phrases like "ending call now" where the full text is guaranteed.
+- `debounce: 100-200` — use when the matched phrase is followed by dynamic content (like a slide number, score, or name) that arrives in subsequent chunks.
+
 ### Transcript
 
 ```javascript

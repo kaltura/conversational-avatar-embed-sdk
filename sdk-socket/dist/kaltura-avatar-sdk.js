@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.3.7
+ * @version 2.3.8
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.3.7';
+  const VERSION = '2.3.8';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -499,12 +499,17 @@
 
     register(name, pattern, handler, options) {
       const timing = options?.timing || 'after';
+      const debounce = options?.debounce || 0;
       const matcher = pattern instanceof RegExp
         ? (text) => pattern.test(text)
         : (text) => text.toLowerCase().includes(pattern.toLowerCase());
 
-      this._commands.set(name, { pattern, matcher, handler, timing, _firedThisUtterance: false });
-      return () => this._commands.delete(name);
+      this._commands.set(name, { pattern, matcher, handler, timing, debounce, _firedThisUtterance: false, _pendingTimer: null, _pendingText: null });
+      return () => {
+        const cmd = this._commands.get(name);
+        if (cmd?._pendingTimer) clearTimeout(cmd._pendingTimer);
+        this._commands.delete(name);
+      };
     }
 
     check(text, phase = 'after') {
@@ -512,26 +517,67 @@
       for (const [name, cmd] of this._commands) {
         const shouldFire = cmd.timing === 'both' || cmd.timing === phase;
         if (!shouldFire) continue;
-        if (cmd._firedThisUtterance) continue;
+        if (cmd._firedThisUtterance) {
+          // Already matched — update pending text if debouncing
+          if (cmd._pendingTimer) {
+            cmd._pendingText = text;
+            clearTimeout(cmd._pendingTimer);
+            cmd._pendingTimer = setTimeout(() => {
+              cmd._pendingTimer = null;
+              this._fireCommand(name, cmd, cmd._pendingText, phase);
+            }, cmd.debounce);
+          }
+          continue;
+        }
         if (!cmd.matcher(text)) continue;
         cmd._firedThisUtterance = true;
-        const match = { command: name, text, pattern: cmd.pattern, timing: phase };
-        try {
-          cmd.handler(match);
-        } catch (e) {
-          console.error(`Command handler error [${name}]:`, e);
+
+        if (cmd.debounce > 0) {
+          cmd._pendingText = text;
+          cmd._pendingTimer = setTimeout(() => {
+            cmd._pendingTimer = null;
+            this._fireCommand(name, cmd, cmd._pendingText, phase);
+          }, cmd.debounce);
+        } else {
+          this._fireCommand(name, cmd, text, phase);
         }
-        this._emitter.emit(Events.COMMAND_MATCHED, match);
       }
+    }
+
+    _fireCommand(name, cmd, text, phase) {
+      const match = { command: name, text, pattern: cmd.pattern, timing: phase };
+      try {
+        cmd.handler(match);
+      } catch (e) {
+        console.error(`Command handler error [${name}]:`, e);
+      }
+      this._emitter.emit(Events.COMMAND_MATCHED, match);
     }
 
     resetUtterance() {
       for (const cmd of this._commands.values()) {
+        // Flush any pending debounced command before resetting
+        if (cmd._pendingTimer) {
+          clearTimeout(cmd._pendingTimer);
+          cmd._pendingTimer = null;
+          if (cmd._pendingText) {
+            const match = { command: '', text: cmd._pendingText, pattern: cmd.pattern, timing: 'before' };
+            for (const [name, c] of this._commands) {
+              if (c === cmd) { match.command = name; break; }
+            }
+            try { cmd.handler(match); } catch (e) { console.error('Command handler error:', e); }
+            this._emitter.emit(Events.COMMAND_MATCHED, match);
+          }
+        }
         cmd._firedThisUtterance = false;
+        cmd._pendingText = null;
       }
     }
 
     clear() {
+      for (const cmd of this._commands.values()) {
+        if (cmd._pendingTimer) clearTimeout(cmd._pendingTimer);
+      }
       this._commands.clear();
     }
 

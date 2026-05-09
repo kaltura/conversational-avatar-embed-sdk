@@ -454,6 +454,95 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────
+  // COMMAND DEBOUNCE
+  // ────────────────────────────────────────────────────────────────────
+
+  test('debounced command waits for chunks before firing', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cr = new CommandRegistry(emitter);
+        let firedText = null;
+        cr.register('nav', 'navigating to slide', (m) => { firedText = m.text; }, { timing: 'before', debounce: 100 });
+
+        let buffer = '';
+        buffer += 'Navigating to slide t';
+        cr.check(buffer, 'before');
+        // At this point the command matched but hasn't fired yet (debouncing)
+
+        setTimeout(() => {
+          buffer += 'wenty-seven. This slide shows';
+          cr.check(buffer, 'before');
+        }, 30);
+
+        setTimeout(() => {
+          buffer += ' our cash flow report.';
+          cr.check(buffer, 'before');
+        }, 60);
+
+        // After 100ms of no new chunks, the command should fire with full text
+        setTimeout(() => {
+          resolve(firedText);
+        }, 250);
+      });
+    });
+    expect(result).toContain('twenty-seven');
+    expect(result).toContain('cash flow');
+  });
+
+  test('debounced command fires immediately on resetUtterance (flush)', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cr = new CommandRegistry(emitter);
+        let firedText = null;
+        cr.register('nav', 'navigating to slide', (m) => { firedText = m.text; }, { timing: 'before', debounce: 500 });
+
+        cr.check('Navigating to slide twenty-seven.', 'before');
+        // Command is pending (500ms debounce)
+        // Utterance ends — resetUtterance should flush immediately
+        cr.resetUtterance();
+        resolve(firedText);
+      });
+    });
+    expect(result).toContain('twenty-seven');
+  });
+
+  test('non-debounced command fires immediately (backward compat)', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let firedText = null;
+      cr.register('end', 'ending call', (m) => { firedText = m.text; }, { timing: 'before' });
+      cr.check('Ending call now.', 'before');
+      return firedText;
+    });
+    expect(result).toBe('Ending call now.');
+  });
+
+  test('debounced command gets latest text not first match text', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cr = new CommandRegistry(emitter);
+        let firedText = null;
+        cr.register('nav', 'navigating to slide', (m) => { firedText = m.text; }, { timing: 'before', debounce: 50 });
+
+        cr.check('Navigating to slide t', 'before');
+        cr.check('Navigating to slide twenty', 'before');
+        cr.check('Navigating to slide twenty-seven.', 'before');
+
+        setTimeout(() => resolve(firedText), 150);
+      });
+    });
+    expect(result).toBe('Navigating to slide twenty-seven.');
+  });
+
+  // ────────────────────────────────────────────────────────────────────
   // DPP MANAGER
   // ────────────────────────────────────────────────────────────────────
 

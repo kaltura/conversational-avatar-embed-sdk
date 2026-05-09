@@ -96,6 +96,8 @@ export interface CommandMatch {
 export interface CommandOptions {
   /** When to fire: 'before' (on text-ready), 'after' (on finished speaking), 'both' (default: 'after') */
   timing?: 'before' | 'after' | 'both';
+  /** Milliseconds to wait for more text chunks before firing (0 = immediate). Use with timing:'before' to avoid matching on incomplete chunked text. */
+  debounce?: number;
 }
 
 export interface StateChangePayload {
