@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.4.6
+ * @version 2.4.7
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.4.6';
+  const VERSION = '2.4.7';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -73,6 +73,12 @@
     RECONNECTING: 'reconnecting',
     RECONNECTED: 'reconnected',
 
+    // Queue / capacity
+    QUEUE_STARTED: 'queue-started',
+    QUEUE_POSITION_CHECK: 'queue-position-check',
+    QUEUE_AVAILABLE: 'queue-available',
+    QUEUE_TIMEOUT: 'queue-timeout',
+
     // Server configuration & lifecycle
     SERVER_CONNECTED: 'server-connected',
     CONFIGURED: 'configured',
@@ -107,7 +113,11 @@
 
     INVALID_CONFIG: 5001,
     CONTAINER_NOT_FOUND: 5002,
-    INVALID_DPP_JSON: 5003
+    INVALID_DPP_JSON: 5003,
+
+    CAPACITY_UNAVAILABLE: 6001,
+    TIER_EXCEEDED: 6002,
+    QUEUE_TIMEOUT: 6003
   });
 
   const DEFAULTS = Object.freeze({
@@ -123,7 +133,8 @@
     MAX_RECONNECT_ATTEMPTS: 5,
     DPP_DEBOUNCE_MS: 200,
     ICE_GATHER_TIMEOUT: 1000,
-    PEER_NAME: 'SDKUser'
+    PEER_NAME: 'SDKUser',
+    QUEUE_DELAYS: Object.freeze([30000, 45000, 60000, 90000, 120000, 180000, 240000, 300000, 360000])
   });
 
   const VALID_TRANSITIONS = {
@@ -426,6 +437,118 @@
 
     cancel() {
       if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // QUEUE MANAGER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  class QueueManager {
+    constructor(config, emitter, logger) {
+      this._enabled = config.enabled;
+      this._maxWaitMs = config.maxWaitMs;
+      this._delays = config.delays;
+      this._emitter = emitter;
+      this._log = logger;
+      this._active = false;
+      this._attempt = 0;
+      this._startTime = 0;
+      this._timer = null;
+      this._socket = null;
+      this._rejoin = null;
+      this._reject = null;
+      this._handler = null;
+    }
+
+    get active() { return this._active; }
+    get waitedMs() { return this._active ? Date.now() - this._startTime : 0; }
+
+    activate(socket, cancelTimeout, rejoin, reject) {
+      if (!this._enabled) return false;
+      if (this._active) return true;
+
+      this._active = true;
+      this._startTime = Date.now();
+      this._socket = socket;
+      this._rejoin = rejoin;
+      this._reject = reject;
+      this._handler = (data) => this._onResult(data);
+
+      cancelTimeout();
+      this._socket.on('availabilityResult', this._handler);
+      this._emitter.emit(Events.QUEUE_STARTED, {});
+      this._log.info('Queued — polling for agent availability');
+      this._poll();
+      return true;
+    }
+
+    cancel() {
+      if (!this._active) return;
+      this._teardown();
+    }
+
+    _poll() {
+      if (!this._active) return;
+      const waited = Date.now() - this._startTime;
+
+      if (this._maxWaitMs > 0 && waited >= this._maxWaitMs) {
+        this._onTimeout(waited);
+        return;
+      }
+
+      const delay = this._delays[this._attempt % this._delays.length];
+      const capped = this._maxWaitMs > 0 ? Math.min(delay, this._maxWaitMs - waited) : delay;
+
+      this._emitter.emit(Events.QUEUE_POSITION_CHECK, {
+        attempt: this._attempt + 1, waitedMs: waited, nextCheckMs: capped
+      });
+
+      this._timer = setTimeout(() => {
+        if (!this._active) return;
+        this._attempt++;
+        this._socket.emit('checkAvailability', {});
+      }, capped);
+    }
+
+    _onResult(data) {
+      if (!this._active) return;
+      if (data && data.available) {
+        this._log.info('Queue: slot available — rejoining');
+        this._emitter.emit(Events.QUEUE_AVAILABLE, {});
+        const rejoin = this._rejoin;
+        this._teardown();
+        rejoin();
+      } else {
+        this._poll();
+      }
+    }
+
+    _onTimeout(waited) {
+      this._log.warn('Queue timed out after ' + waited + 'ms');
+      this._emitter.emit(Events.QUEUE_TIMEOUT, { waitedMs: waited });
+      const reject = this._reject;
+      this._teardown();
+      reject(new AvatarError(ErrorCode.QUEUE_TIMEOUT,
+        'Queue wait exceeded ' + this._maxWaitMs + 'ms', { recoverable: true }));
+    }
+
+    _teardown() {
+      this._active = false;
+      if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+      if (this._socket && this._handler) {
+        this._socket.off('availabilityResult', this._handler);
+      }
+      this._socket = null;
+      this._rejoin = null;
+      this._reject = null;
+      this._handler = null;
+    }
+
+    reset() {
+      this.cancel();
+      this._attempt = 0;
+      this._startTime = 0;
     }
   }
 
@@ -2753,6 +2876,11 @@
           container: config.captions?.container || null,
           replacements: config.captions?.replacements || null,
           filter: config.captions?.filter || null
+        }),
+        queue: Object.freeze({
+          enabled: config.queue?.enabled !== false,
+          maxWaitMs: config.queue?.maxWaitMs || 0,
+          delays: Object.freeze(config.queue?.delays || DEFAULTS.QUEUE_DELAYS)
         })
       });
 
@@ -2763,6 +2891,7 @@
         baseDelay: this._config.reconnectBaseDelay,
         maxAttempts: this._config.maxReconnectAttempts
       });
+      this._queue = new QueueManager(this._config.queue, this._emitter, this._log);
       this._transcript = new TranscriptManager(this._emitter);
       this._transcript.setEnabled(this._config.transcriptEnabled);
       this._commands = new CommandRegistry(this._emitter);
@@ -2819,13 +2948,31 @@
       this._roomId = generateId(8);
 
       try {
-        await withTimeout(this._initSocket(), this._config.connectionTimeout, 'Connection');
+        await this._connectWithQueue();
       } catch (err) {
         this._state.transition(State.ERROR);
         this._emitter.emit(Events.ERROR, err instanceof AvatarError ? err : new AvatarError(ErrorCode.CONNECTION_FAILED, err.message, { cause: err }));
-        if (this._config.autoReconnect) this._attemptReconnect();
+        if (this._config.autoReconnect && err.code !== ErrorCode.TIER_EXCEEDED) this._attemptReconnect();
         throw err;
       }
+    }
+
+    _connectWithQueue() {
+      return new Promise((resolve, reject) => {
+        let timer = setTimeout(() => {
+          if (!this._queue.active) {
+            reject(new AvatarError(ErrorCode.CONNECTION_TIMEOUT,
+              'Connection timed out after ' + this._config.connectionTimeout + 'ms',
+              { recoverable: true }));
+          }
+        }, this._config.connectionTimeout);
+        const cancelTimeout = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+        this._initSocket(cancelTimeout, reject).then(
+          (v) => { cancelTimeout(); resolve(v); },
+          (e) => { cancelTimeout(); reject(e); }
+        );
+      });
     }
 
     async start() { return this.connect(); }
@@ -2833,6 +2980,7 @@
     disconnect() {
       if (this._state.is(State.DESTROYED, State.UNINITIALIZED)) return;
       this._intentionalDisconnect = true;
+      this._queue.cancel();
       this._genui.hide();
       this._cleanupMedia();
       this._cleanupConnection();
@@ -2846,6 +2994,7 @@
 
     destroy() {
       this._reconnect.cancel();
+      this._queue.cancel();
       this._dpp.cancelDebounce();
       this._genui.destroy();
       this._captions.destroy();
@@ -2965,6 +3114,7 @@
     getMicStream() { return this._mic.stream; }
     isConnected() { return this._state.is(State.CONNECTED, State.JOINING, State.JOINED, State.IN_CONVERSATION); }
     isInConversation() { return this._state.is(State.IN_CONVERSATION); }
+    isQueued() { return this._queue.active; }
     isAvatarSpeaking() { return this._avatarSpeaking; }
     isUserSpeaking() { return this._userSpeaking; }
 
@@ -3074,7 +3224,7 @@
     // INTERNAL: SOCKET INITIALIZATION
     // ─────────────────────────────────────────────────────────────────────────
 
-    _initSocket() {
+    _initSocket(cancelTimeout, outerReject) {
       return new Promise((resolve, reject) => {
         const socketUrl = this._config.endpoints.socket;
         const query = {
@@ -3109,6 +3259,15 @@
         this._socket.on('disconnect', (reason) => {
           this._log.info('Socket disconnected', reason);
           if (this._intentionalDisconnect) return;
+          if (this._queue.active) {
+            this._queue.cancel();
+            if (!resolved) {
+              resolved = true;
+              reject(new AvatarError(ErrorCode.CONNECTION_LOST,
+                'Socket disconnected while queued: ' + reason, { recoverable: true }));
+            }
+            return;
+          }
           this._genui.hide();
           if (this._state.is(State.IN_CONVERSATION, State.JOINED, State.JOINING)) {
             this._state.transition(State.ERROR);
@@ -3118,6 +3277,38 @@
             }
           }
           this._emitter.emit(Events.DISCONNECTED, { reason });
+        });
+
+        // Capacity gating
+        this._socket.on('throwToNoAgent', () => {
+          if (resolved || this._queue.active) return;
+          this._log.warn('Server: all agent slots busy');
+          const activated = this._queue.activate(this._socket, cancelTimeout, () => {
+            this._socket.emit('join', {
+              client: this._config.clientId,
+              channel: this._roomId,
+              userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK',
+              channel_password: null,
+              peer_name: this._config.peerName,
+              peer_video: false,
+              peer_audio: true,
+              isMobile: false
+            });
+            this._state.transition(State.JOINING);
+          }, outerReject);
+          if (!activated) {
+            resolved = true;
+            reject(new AvatarError(ErrorCode.CAPACITY_UNAVAILABLE,
+              'All agent slots are busy', { recoverable: true }));
+          }
+        });
+
+        this._socket.on('throwToExceededTier', () => {
+          if (resolved) return;
+          this._log.error('Server: account tier/plan limit exceeded');
+          resolved = true;
+          reject(new AvatarError(ErrorCode.TIER_EXCEEDED,
+            'Account plan limit exceeded', { recoverable: false }));
         });
 
         // Protocol flow
@@ -3175,6 +3366,7 @@
 
         this._socket.on('showAgent', () => {
           this._log.debug('Agent visible');
+          this._queue.cancel();
           this._emitter.emit(Events.SHOWING_AGENT);
           if (!resolved) { resolved = true; resolve(); }
         });
@@ -3568,6 +3760,7 @@
       this._sessionId = null;
       this._avatarSpeaking = false;
       this._userSpeaking = false;
+      this._queue.reset();
       this._captions.interrupt();
     }
 
@@ -3590,7 +3783,7 @@
 
   // Expose internals for advanced use and testing
   KalturaAvatarSDK.AvatarError = AvatarError;
-  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader, CaptionManager, CaptionSegmenter, CaptionScheduler, CaptionRateEstimator, CaptionRenderer, CaptionFilter };
+  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, QueueManager, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader, CaptionManager, CaptionSegmenter, CaptionScheduler, CaptionRateEstimator, CaptionRenderer, CaptionFilter };
 
   return KalturaAvatarSDK;
 }));

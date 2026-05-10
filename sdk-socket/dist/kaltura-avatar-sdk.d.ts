@@ -34,6 +34,8 @@ export interface AvatarConfig {
   genui?: Partial<GenUIConfig>;
   /** Closed captions configuration */
   captions?: Partial<CaptionConfig>;
+  /** Server queue / capacity handling configuration */
+  queue?: Partial<QueueConfig>;
 }
 
 export interface EndpointConfig {
@@ -324,6 +326,29 @@ export interface CaptionInterruptedPayload {
   lastSegmentIndex: number;
 }
 
+export interface QueueConfig {
+  /** Enable queue waiting when server is at capacity (default: true). When false, connect() rejects immediately if busy. */
+  enabled: boolean;
+  /** Maximum time to wait in queue in ms (default: 0 = wait forever) */
+  maxWaitMs: number;
+  /** Poll delay cycle in ms. Cycles through the array, then restarts. Default: [30s, 45s, 1m, 1.5m, 2m, 3m, 4m, 5m, 6m] */
+  delays: number[];
+}
+
+export interface QueuePositionCheckPayload {
+  /** Current poll attempt number (1-based) */
+  attempt: number;
+  /** Milliseconds waited so far */
+  waitedMs: number;
+  /** Milliseconds until next availability check */
+  nextCheckMs: number;
+}
+
+export interface QueueTimeoutPayload {
+  /** Total milliseconds waited before timeout */
+  waitedMs: number;
+}
+
 export interface ReconnectingPayload {
   attempt: number;
   maxAttempts: number;
@@ -435,6 +460,11 @@ export interface AvatarEventMap {
   'caption-end': CaptionEndPayload;
   'caption-interrupted': CaptionInterruptedPayload;
 
+  'queue-started': {};
+  'queue-position-check': QueuePositionCheckPayload;
+  'queue-available': {};
+  'queue-timeout': QueueTimeoutPayload;
+
   'reconnecting': ReconnectingPayload;
   'reconnected': void;
 
@@ -526,6 +556,8 @@ export declare class KalturaAvatarSDK {
   getMicStream(): MediaStream | null;
   isConnected(): boolean;
   isInConversation(): boolean;
+  /** Whether the SDK is currently waiting in queue for an available agent slot */
+  isQueued(): boolean;
   isAvatarSpeaking(): boolean;
   isUserSpeaking(): boolean;
 
@@ -633,6 +665,10 @@ declare const AvatarEvents: {
   readonly CAPTION_SEGMENT: 'caption-segment';
   readonly CAPTION_END: 'caption-end';
   readonly CAPTION_INTERRUPTED: 'caption-interrupted';
+  readonly QUEUE_STARTED: 'queue-started';
+  readonly QUEUE_POSITION_CHECK: 'queue-position-check';
+  readonly QUEUE_AVAILABLE: 'queue-available';
+  readonly QUEUE_TIMEOUT: 'queue-timeout';
   readonly RECONNECTING: 'reconnecting';
   readonly RECONNECTED: 'reconnected';
   readonly SERVER_CONNECTED: 'server-connected';

@@ -1607,4 +1607,234 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     expect(result.length).toBeGreaterThan(0);
     expect(result.join(' ')).toContain('Just one sentence without another');
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // QUEUE MANAGER
+  // ────────────────────────────────────────────────────────────────────
+
+  test('QueueManager: enabled=false returns false from activate', async () => {
+    const result = await page.evaluate(() => {
+      const { QueueManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const qm = new QueueManager({ enabled: false, maxWaitMs: 0, delays: [100] }, emitter, new Logger('test', false));
+      const mockSocket = { on() {}, off() {}, emit() {} };
+      return qm.activate(mockSocket, () => {}, () => {}, () => {});
+    });
+    expect(result).toBe(false);
+  });
+
+  test('QueueManager: activate returns true and sets active', async () => {
+    const result = await page.evaluate(() => {
+      const { QueueManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const qm = new QueueManager({ enabled: true, maxWaitMs: 0, delays: [100] }, emitter, new Logger('test', false));
+      const mockSocket = { on() {}, off() {}, emit() {} };
+      const activated = qm.activate(mockSocket, () => {}, () => {}, () => {});
+      return { activated, active: qm.active };
+    });
+    expect(result.activated).toBe(true);
+    expect(result.active).toBe(true);
+  });
+
+  test('QueueManager: cancel deactivates and clears timer', async () => {
+    const result = await page.evaluate(() => {
+      const { QueueManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const qm = new QueueManager({ enabled: true, maxWaitMs: 0, delays: [100] }, emitter, new Logger('test', false));
+      const mockSocket = { on() {}, off() {}, emit() {} };
+      qm.activate(mockSocket, () => {}, () => {}, () => {});
+      qm.cancel();
+      return qm.active;
+    });
+    expect(result).toBe(false);
+  });
+
+  test('QueueManager: available=true invokes rejoin callback', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { QueueManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const qm = new QueueManager({ enabled: true, maxWaitMs: 0, delays: [50] }, emitter, new Logger('test', false));
+        let handlers = {};
+        const mockSocket = {
+          on(e, fn) { handlers[e] = fn; },
+          off() {},
+          emit() {}
+        };
+        let rejoined = false;
+        qm.activate(mockSocket, () => {}, () => { rejoined = true; }, () => {});
+        // Simulate server response after poll
+        setTimeout(() => {
+          handlers['availabilityResult']({ available: true });
+          resolve({ rejoined, active: qm.active });
+        }, 80);
+      });
+    });
+    expect(result.rejoined).toBe(true);
+    expect(result.active).toBe(false);
+  });
+
+  test('QueueManager: available=false reschedules next poll', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { QueueManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        let checkCount = 0;
+        const qm = new QueueManager({ enabled: true, maxWaitMs: 0, delays: [30, 40] }, emitter, new Logger('test', false));
+        let handlers = {};
+        const mockSocket = {
+          on(e, fn) { handlers[e] = fn; },
+          off() {},
+          emit(e) { if (e === 'checkAvailability') checkCount++; }
+        };
+        qm.activate(mockSocket, () => {}, () => {}, () => {});
+        // After first poll fires, respond not available
+        setTimeout(() => {
+          handlers['availabilityResult']({ available: false });
+        }, 50);
+        // After second poll fires, check count and resolve
+        setTimeout(() => {
+          qm.cancel();
+          resolve({ checkCount, active: qm.active });
+        }, 120);
+      });
+    });
+    expect(result.checkCount).toBeGreaterThanOrEqual(1);
+    expect(result.active).toBe(false);
+  });
+
+  test('QueueManager: maxWaitMs triggers timeout rejection', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { QueueManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const qm = new QueueManager({ enabled: true, maxWaitMs: 80, delays: [30] }, emitter, new Logger('test', false));
+        let handlers = {};
+        const mockSocket = {
+          on(e, fn) { handlers[e] = fn; },
+          off() {},
+          emit(e) {
+            if (e === 'checkAvailability') {
+              // Respond not-available after each poll to trigger next _poll()
+              setTimeout(() => { if (handlers['availabilityResult']) handlers['availabilityResult']({ available: false }); }, 5);
+            }
+          }
+        };
+        let rejected = null;
+        let timeoutEvent = null;
+        emitter.on('queue-timeout', (data) => { timeoutEvent = data; });
+        qm.activate(mockSocket, () => {}, () => {}, (err) => { rejected = err; });
+        setTimeout(() => {
+          resolve({ rejected: rejected ? { code: rejected.code, message: rejected.message } : null, timeoutEvent, active: qm.active });
+        }, 200);
+      });
+    });
+    expect(result.rejected).not.toBeNull();
+    expect(result.rejected.code).toBe(6003);
+    expect(result.timeoutEvent).not.toBeNull();
+    expect(result.timeoutEvent.waitedMs).toBeGreaterThanOrEqual(60);
+    expect(result.active).toBe(false);
+  });
+
+  test('QueueManager: delays cycle wraps around after exhausting array', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { QueueManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const delays = [];
+        emitter.on('queue-position-check', (data) => { delays.push(data.nextCheckMs); });
+        const qm = new QueueManager({ enabled: true, maxWaitMs: 0, delays: [10, 20, 30] }, emitter, new Logger('test', false));
+        let handlers = {};
+        const mockSocket = {
+          on(e, fn) { handlers[e] = fn; },
+          off() {},
+          emit(e) {
+            if (e === 'checkAvailability') {
+              // Respond not available to trigger next poll
+              setTimeout(() => handlers['availabilityResult']({ available: false }), 5);
+            }
+          }
+        };
+        qm.activate(mockSocket, () => {}, () => {}, () => {});
+        // Wait enough for 5 polls (cycles through 3-item array)
+        setTimeout(() => {
+          qm.cancel();
+          resolve(delays);
+        }, 300);
+      });
+    });
+    // Should cycle: 10, 20, 30, 10, 20 (or at least 4+ showing wrap)
+    expect(result.length).toBeGreaterThanOrEqual(4);
+    expect(result[0]).toBe(10);
+    expect(result[1]).toBe(20);
+    expect(result[2]).toBe(30);
+    expect(result[3]).toBe(10);
+  });
+
+  test('SDK: throwToNoAgent with queue enabled emits queue-started', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      let eventFired = false;
+      sdk.on('queue-started', () => { eventFired = true; });
+      // Simulate: manually trigger throwToNoAgent scenario via _queue
+      const mockSocket = { on() {}, off() {}, emit() {} };
+      sdk._queue.activate(mockSocket, () => {}, () => {}, () => {});
+      const result = { eventFired, isQueued: sdk.isQueued() };
+      sdk._queue.cancel();
+      sdk.destroy();
+      return result;
+    });
+    expect(result.eventFired).toBe(true);
+    expect(result.isQueued).toBe(true);
+  });
+
+  test('SDK: throwToExceededTier error code is 6002', async () => {
+    const result = await page.evaluate(() => {
+      return KalturaAvatarSDK.ErrorCode.TIER_EXCEEDED;
+    });
+    expect(result).toBe(6002);
+  });
+
+  test('SDK: isQueued() returns false by default', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const q = sdk.isQueued();
+      sdk.destroy();
+      return q;
+    });
+    expect(result).toBe(false);
+  });
+
+  test('SDK: queue events have correct payload shape', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { QueueManager, TypedEventEmitter, Logger } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        let posCheckPayload = null;
+        let availablePayload = null;
+        emitter.on('queue-position-check', (d) => { posCheckPayload = d; });
+        emitter.on('queue-available', (d) => { availablePayload = d; });
+        const qm = new QueueManager({ enabled: true, maxWaitMs: 0, delays: [30] }, emitter, new Logger('test', false));
+        let handlers = {};
+        const mockSocket = {
+          on(e, fn) { handlers[e] = fn; },
+          off() {},
+          emit() {}
+        };
+        qm.activate(mockSocket, () => {}, () => {}, () => {});
+        setTimeout(() => {
+          handlers['availabilityResult']({ available: true });
+          resolve({
+            posCheck: posCheckPayload,
+            available: availablePayload
+          });
+        }, 50);
+      });
+    });
+    expect(result.posCheck).not.toBeNull();
+    expect(typeof result.posCheck.attempt).toBe('number');
+    expect(typeof result.posCheck.waitedMs).toBe('number');
+    expect(typeof result.posCheck.nextCheckMs).toBe('number');
+    expect(result.available).toEqual({});
+  });
 });

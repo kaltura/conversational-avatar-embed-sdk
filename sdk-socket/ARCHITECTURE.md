@@ -35,6 +35,7 @@ All classes are defined inside the UMD factory function (not exported individual
 | `ReconnectStrategy` | Exponential backoff with jitter |
 | `TranscriptManager` | Records speech, formats, exports |
 | `CommandRegistry` | Pattern-matching on avatar speech with timing control |
+| `QueueManager` | Cyclic-delay availability polling when server is at capacity |
 | `CaptionFilter` | TTS word replacements + punctuation normalization for display text |
 | `DPPManager` | Validates and emits Dynamic Prompt Injection |
 | `MicrophoneManager` | getUserMedia wrapper with mute/unmute |
@@ -264,6 +265,41 @@ CaptionManager.interrupt()
 - `aria-live="off"` when audio audible (deaf/HoH read visually); switches to `aria-live="polite"` when video muted
 - Toggle state announced to screen readers via `role="status"` live region
 - User toggle preference persisted in localStorage
+
+---
+
+## Queue / Capacity Pipeline
+
+```
+sdk.connect()
+  └─> _initSocket(cancelTimeout, outerReject)
+       ├─ socket connects → 'onServerConnected' → emit 'join'
+       │
+       ├─ NORMAL: joinComplete → showAgent → resolve ✓
+       │
+       ├─ QUEUE: 'throwToNoAgent' fires
+       │   ├─ queue.enabled=false → reject(CAPACITY_UNAVAILABLE)
+       │   └─ queue.enabled=true → QueueManager.activate()
+       │        ├─ cancelTimeout() — disables 15s deadline
+       │        ├─ emits 'queue-started'
+       │        ├─ waits delays[0]=30s → checkAvailability
+       │        │   └─ availabilityResult { available: false }
+       │        │        └─ waits delays[1]=45s → poll again...
+       │        │   └─ availabilityResult { available: true }
+       │        │        ├─ emits 'queue-available'
+       │        │        └─ re-emits 'join' (same socket)
+       │        │             └─ joinComplete → showAgent → resolve ✓
+       │        └─ maxWaitMs exceeded → reject(QUEUE_TIMEOUT)
+       │
+       └─ HARD FAIL: 'throwToExceededTier' → reject(TIER_EXCEEDED)
+```
+
+**Key design decisions:**
+- State stays `CONNECTING` throughout queue wait — no new state machine states needed
+- Socket remains alive during wait; re-emit `join` on the same connection when available
+- Delay cycle: `[30s, 45s, 1m, 1.5m, 2m, 3m, 4m, 5m, 6m]` — wraps via modulo, infinite
+- `connectionTimeout` (15s) is cancelled when queue activates — queue manages its own timeout via `maxWaitMs`
+- Default `maxWaitMs: 0` = wait forever (suitable for kiosks, embedded displays)
 
 ---
 

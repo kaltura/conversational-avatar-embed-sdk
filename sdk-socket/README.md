@@ -177,6 +177,24 @@ const sdk = new KalturaAvatarSDK({
   // Tip: Increase this on slow networks
   // Default: 15000 (15 seconds)
 
+  queue: {
+    enabled: true,
+    // What: When all agent slots are busy, wait and retry instead of failing
+    // Set to false: If you want fail-fast behavior (reject immediately)
+    // Default: true
+
+    maxWaitMs: 0,
+    // What: Maximum time (ms) to wait in queue before giving up
+    // 0 = wait forever (suitable for kiosks, embedded displays)
+    // Example: 120000 (2 minutes)
+    // Default: 0
+
+    delays: [30000, 45000, 60000, 90000, 120000, 180000, 240000, 300000, 360000],
+    // What: Polling cycle — time between availability checks (ms)
+    // How it works: After exhausting the array, wraps back to index 0
+    // Default: [30s, 45s, 1m, 1.5m, 2m, 3m, 4m, 5m, 6m] → cycle repeats
+  },
+
   transcriptEnabled: true,
   // What: Automatically record all avatar and user speech
   // Why disable: If you don't need transcript and want less memory usage
@@ -435,6 +453,29 @@ sdk.on('time-warning', ({ remainingSeconds }) => {
 });
 ```
 
+### Queue Events
+
+| Event | When It Fires | What You Get |
+|-------|---------------|--------------|
+| `'queue-started'` | All agent slots busy, queue polling begins | `{}` |
+| `'queue-position-check'` | Each availability poll is scheduled | `{ attempt: 1, waitedMs: 30000, nextCheckMs: 45000 }` |
+| `'queue-available'` | Slot freed, auto-rejoining | `{}` |
+| `'queue-timeout'` | `maxWaitMs` exceeded while queued | `{ waitedMs: 120000 }` |
+
+```javascript
+sdk.on('queue-started', () => {
+  showWaitingUI('All agents are busy. Waiting for an available slot...');
+});
+
+sdk.on('queue-position-check', ({ attempt, waitedMs, nextCheckMs }) => {
+  updateWaitingUI(`Check ${attempt} — waited ${Math.round(waitedMs/1000)}s, next in ${Math.round(nextCheckMs/1000)}s`);
+});
+
+sdk.on('queue-available', () => {
+  hideWaitingUI();
+});
+```
+
 ### Command Events
 
 | Event | When It Fires | What You Get |
@@ -682,6 +723,7 @@ sdk.getVideos().forEach(v => {
 sdk.getState();          // 'uninitialized', 'connecting', 'in-conversation', etc.
 sdk.isConnected();       // true/false
 sdk.isInConversation();  // true/false  
+sdk.isQueued();          // true if waiting in server queue
 sdk.isAvatarSpeaking();  // true while avatar is talking
 sdk.isUserSpeaking();    // true while user is talking (server VAD)
 sdk.getSessionId();      // WebRTC session ID (for debugging)
@@ -983,6 +1025,87 @@ When something goes wrong, the `'error'` event gives you an `AvatarError` with a
 | 5001 | INVALID_CONFIG | Bad configuration | Check the error message for details |
 | 5002 | CONTAINER_NOT_FOUND | CSS selector doesn't match anything | Check your `container` value |
 | 5003 | INVALID_DPP_JSON | DPP data isn't valid JSON | Fix the JSON string |
+| 6001 | CAPACITY_UNAVAILABLE | All agent slots busy + queue disabled | Enable queue or retry later |
+| 6002 | TIER_EXCEEDED | Account plan limit exceeded (hard, no retry) | Upgrade your plan |
+| 6003 | QUEUE_TIMEOUT | `maxWaitMs` exceeded while queued | Increase timeout or try later |
+
+---
+
+## Server Queue & Capacity
+
+When all avatar agent slots are busy, the server emits a "no available agent" signal. By default, the SDK queues seamlessly — `connect()` waits silently for a slot to open, then completes normally. No code changes needed.
+
+### Default Behavior
+
+```javascript
+// This just works — if the server is busy, it waits automatically
+await sdk.connect();
+// Resolves when a slot becomes available (could be 30s or 5 min later)
+```
+
+### Custom Waiting UI
+
+```javascript
+const sdk = new KalturaAvatarSDK({
+  clientId, flowId, container: '#avatar',
+  queue: { enabled: true, maxWaitMs: 300000 } // give up after 5 min
+});
+
+sdk.on('queue-started', () => {
+  showSpinner('All agents are busy — please wait...');
+});
+
+sdk.on('queue-position-check', ({ attempt, waitedMs }) => {
+  updateSpinner(`Still waiting... (${Math.round(waitedMs / 1000)}s)`);
+});
+
+sdk.on('queue-available', () => {
+  hideSpinner();
+});
+
+try {
+  await sdk.connect();
+} catch (err) {
+  if (err.code === 6003) {
+    showMessage('Wait time exceeded. Please try again later.');
+  }
+}
+```
+
+### Fail-Fast (No Queuing)
+
+```javascript
+const sdk = new KalturaAvatarSDK({
+  clientId, flowId, container: '#avatar',
+  queue: { enabled: false }
+});
+
+try {
+  await sdk.connect();
+} catch (err) {
+  if (err.code === 6001) {
+    showMessage('All agents are busy. Please try again in a few minutes.');
+  }
+}
+```
+
+### Checking Queue State
+
+```javascript
+sdk.isQueued();  // true if currently waiting in queue
+```
+
+### How It Works
+
+1. `connect()` attempts to join normally
+2. If the server says "no agent available":
+   - `queue.enabled = false` → reject immediately with `CAPACITY_UNAVAILABLE`
+   - `queue.enabled = true` → start polling cycle
+3. Polling cycle: wait 30s → check → wait 45s → check → wait 1m → ... → wait 6m → cycle restarts at 30s
+4. When the server responds "available": auto-rejoin on the same socket, `connect()` resolves
+5. If `maxWaitMs > 0` and exceeded: reject with `QUEUE_TIMEOUT`
+
+The socket stays alive during the entire wait. No reconnection, no new handshake — the SDK re-emits `join` on the existing connection.
 
 ---
 
@@ -1061,7 +1184,7 @@ Requires: WebRTC, getUserMedia, fetch API
 ```bash
 cd sdk-socket
 npm install
-npm test           # Unit + GenUI + caption tests (195 tests, ~15 seconds)
+npm test           # Unit + GenUI + caption tests (206 tests, ~15 seconds)
 npm run test:live  # Live integration tests (connects to real server)
 npm run test:all   # All tests
 ```
