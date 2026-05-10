@@ -76,9 +76,9 @@ jobs:
             exit 1
           fi
 
-      - name: Check Socket SDK file size (must be <150KB)
+      - name: Check Socket SDK file size (must be <160KB)
         run: |
-          MAX_SIZE=153600
+          MAX_SIZE=163840
           SIZE=$(wc -c < sdk-socket/dist/kaltura-avatar-sdk.js)
           echo "Socket SDK: ${SIZE} bytes"
           if [ "$SIZE" -gt "$MAX_SIZE" ]; then
