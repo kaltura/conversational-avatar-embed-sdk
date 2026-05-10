@@ -722,6 +722,15 @@ sdk.setCaptionStyle({
   fontSize: 20,
   backgroundColor: 'rgba(0,0,0,0.9)'
 });
+
+// Move captions to a different container
+sdk.setCaptionContainer('#my-caption-area');
+sdk.setCaptionContainer(document.getElementById('custom-container'));
+
+// Show/hide the CC toggle button (captions still work, just no built-in toggle)
+sdk.setCaptionToggleVisible(false);  // hide toggle button
+sdk.setCaptionToggleVisible(true);   // show toggle button
+sdk.isCaptionToggleVisible();        // check visibility
 ```
 
 ### Caption Events

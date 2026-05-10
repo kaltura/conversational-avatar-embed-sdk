@@ -874,6 +874,23 @@
       return this._toggle.getAttribute('aria-checked') === 'true';
     }
 
+    setToggleVisible(visible) {
+      if (!this._toggle) return;
+      this._toggle.style.display = visible ? '' : 'none';
+    }
+
+    isToggleVisible() {
+      if (!this._toggle) return false;
+      return this._toggle.style.display !== 'none';
+    }
+
+    reattach(newParent) {
+      if (!this._root) return;
+      if (this._root.parentNode) this._root.parentNode.removeChild(this._root);
+      this._applyVars(newParent);
+      newParent.appendChild(this._root);
+    }
+
     _applyVars(parent) {
       const c = this._config;
       if (c.fontSize) parent.style.setProperty('--kav-cc-size', typeof c.fontSize === 'number' ? c.fontSize + 'px' : c.fontSize);
@@ -983,6 +1000,20 @@
       if (style.fontFamily) parent.style.setProperty('--kav-cc-font', style.fontFamily);
       if (style.textColor) parent.style.setProperty('--kav-cc-text', style.textColor);
       if (style.backgroundColor) parent.style.setProperty('--kav-cc-bg', style.backgroundColor);
+    }
+
+    setContainer(container) {
+      if (!this._renderer) return;
+      const el = typeof container === 'string' ? document.querySelector(container) : container;
+      if (el) this._renderer.reattach(el);
+    }
+
+    setToggleVisible(visible) {
+      if (this._renderer) this._renderer.setToggleVisible(visible);
+    }
+
+    isToggleVisible() {
+      return this._renderer ? this._renderer.isToggleVisible() : false;
     }
 
     onChunk(text, speechId) {
@@ -2899,6 +2930,9 @@
     setCaptionsEnabled(enabled) { this._captions.setEnabled(enabled); }
     isCaptionsEnabled() { return this._captions.isEnabled(); }
     setCaptionStyle(style) { this._captions.setStyle(style); }
+    setCaptionContainer(container) { this._captions.setContainer(container); }
+    setCaptionToggleVisible(visible) { this._captions.setToggleVisible(visible); }
+    isCaptionToggleVisible() { return this._captions.isToggleVisible(); }
 
     // ─────────────────────────────────────────────────────────────────────────
     // INTERNAL: SOCKET INITIALIZATION

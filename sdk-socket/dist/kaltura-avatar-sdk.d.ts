@@ -549,6 +549,12 @@ export declare class KalturaAvatarSDK {
   isCaptionsEnabled(): boolean;
   /** Override caption display styles at runtime */
   setCaptionStyle(style: Partial<CaptionStyle>): void;
+  /** Move caption rendering to a different container element */
+  setCaptionContainer(container: string | HTMLElement): void;
+  /** Show or hide the CC toggle button (captions still fire events when hidden) */
+  setCaptionToggleVisible(visible: boolean): void;
+  /** Check if the CC toggle button is currently visible */
+  isCaptionToggleVisible(): boolean;
 
   // ── Contact Collection (convenience) ──
   /** Submit contact info to server (convenience method for custom contact forms) */
