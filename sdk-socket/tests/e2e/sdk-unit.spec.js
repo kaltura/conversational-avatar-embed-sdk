@@ -1493,7 +1493,6 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     const result = await page.evaluate(() => {
       const { CaptionFilter } = KalturaAvatarSDK._internals;
       const f = new CaptionFilter({});
-      // Initially no replacements
       const before = f.apply('The gap revenue is up.');
       f.setReplacements({ 'gap': 'GAAP' });
       const after = f.apply('The gap revenue is up.');
@@ -1501,5 +1500,88 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     });
     expect(result.before).toBe('The gap revenue is up.');
     expect(result.after).toBe('The GAAP revenue is up.');
+  });
+
+  test('streaming: late chunks do not merge with already-committed segments', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => segments.push(p.text));
+
+        // Simulate streaming: first chunk has two sentences
+        cm.onChunk('Hello world. How are you? ', 's1');
+        cm.onSpeakingStart();
+        // First segment shown immediately
+
+        // Late chunk arrives — should NOT merge with "How are you?"
+        setTimeout(() => {
+          cm.onChunk('I am fine. Thanks for asking.', 's1');
+          // Let tick advance
+          setTimeout(() => {
+            cm.onSpeakingEnd('Hello world. How are you? I am fine. Thanks for asking.', 's1');
+            resolve(segments);
+          }, 2000);
+        }, 100);
+      });
+    });
+    // "How are you?" must be its own segment, never merged with "I am fine."
+    expect(result.some(s => s.includes('How are you?') && !s.includes('I am fine'))).toBe(true);
+    // All text must appear
+    const joined = result.join(' ');
+    expect(joined).toContain('Hello world.');
+    expect(joined).toContain('How are you?');
+    expect(joined).toContain('I am fine.');
+    expect(joined).toContain('Thanks for asking.');
+  });
+
+  test('streaming: segments array is append-only (never shrinks or mutates)', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+
+      cm.onChunk('First sentence. Second sentence. ', 's1');
+      cm.onSpeakingStart();
+      const after1 = [...cm._segments];
+
+      cm.onChunk('Third sentence. Fourth sentence. ', 's1');
+      const after2 = [...cm._segments];
+
+      // after2 must start with exactly the same segments as after1
+      const stable = after1.every((seg, i) => after2[i] === seg);
+      const grew = after2.length >= after1.length;
+
+      return { stable, grew, len1: after1.length, len2: after2.length };
+    });
+    expect(result.stable).toBe(true);
+    expect(result.grew).toBe(true);
+    expect(result.len2).toBeGreaterThan(result.len1);
+  });
+
+  test('streaming: onSpeakingEnd flushes remaining uncommitted text', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => segments.push(p.text));
+
+        // Only one sentence — no boundary, so _appendNewSegments won't commit
+        cm.onChunk('Just one sentence without another', 's1');
+        cm.onSpeakingStart();
+
+        setTimeout(() => {
+          // onSpeakingEnd should flush it even without a sentence boundary
+          cm.onSpeakingEnd('Just one sentence without another', 's1');
+          resolve(segments);
+        }, 300);
+      });
+    });
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.join(' ')).toContain('Just one sentence without another');
   });
 });

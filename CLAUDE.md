@@ -31,7 +31,7 @@ Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowle
 - Types: `sdk-socket/dist/kaltura-avatar-sdk.d.ts`
 - Architecture: `sdk-socket/ARCHITECTURE.md`
 - Demo: `sdk-socket/examples/demo/index.html`
-- Tests: `sdk-socket/tests/e2e/` (191 tests via Playwright)
+- Tests: `sdk-socket/tests/e2e/` (194 tests via Playwright)
 - Peer dependency: Socket.IO client v4
 
 ### Key Socket SDK Patterns

@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.4.4
+ * @version 2.4.5
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.4.4';
+  const VERSION = '2.4.5';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -762,6 +762,19 @@
     _splitClauses(text) {
       return text.split(/(?<=[,;:—])\s+/).filter(c => c.trim());
     }
+
+    sentenceBoundaries(text) {
+      const boundaries = [];
+      const re = /[.!?]+/g;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        const endPos = m.index + m[0].length;
+        if (this._isSentenceEnd(text, m.index, endPos)) {
+          boundaries.push(endPos);
+        }
+      }
+      return boundaries;
+    }
   }
 
   class CaptionScheduler {
@@ -1026,6 +1039,7 @@
       this._responseId = null;
       this._textBuffer = '';
       this._segments = [];
+      this._commitBoundary = 0;
       this._displayedIndex = -1;
       this._displayedAt = 0;
       this._displayedLen = 0;
@@ -1113,6 +1127,7 @@
         this._responseId = rid;
         this._textBuffer = '';
         this._segments = [];
+        this._commitBoundary = 0;
         this._displayedIndex = -1;
         this._displayedAt = 0;
         this._displayedLen = 0;
@@ -1122,9 +1137,7 @@
       }
 
       this._textBuffer += text;
-
-      // Re-segment on every chunk so the tick has up-to-date segments
-      this._segments = this._segmenter.segment(this._textBuffer);
+      this._appendNewSegments();
     }
 
     onSpeakingStart() {
@@ -1132,12 +1145,9 @@
       this._speakingStartTime = Date.now();
       this._speaking = true;
 
-      // Segment current buffer and show first segment if it's complete
-      this._segments = this._segmenter.segment(this._textBuffer);
+      this._appendNewSegments();
       if (this._segments.length > 0 && this._displayedIndex < 0) {
-        // Only show if: multiple segments exist (first ends at natural boundary)
-        // OR the buffer ends with sentence punctuation (complete thought)
-        if (this._segments.length > 1 || /[.!?]["'’)]*\s*$/.test(this._textBuffer)) {
+        if (this._segments.length > 1 || /[.!?]["’’)]*\s*$/.test(this._textBuffer)) {
           this._show(0);
         }
       }
@@ -1158,16 +1168,24 @@
       if (!this._active && fullText && fullText.trim()) {
         this._responseId = speechId || this._generateId();
         this._textBuffer = fullText;
+        this._commitBoundary = 0;
         this._active = true;
         this._emitter.emit(Events.CAPTION_START, { responseId: this._responseId });
-        this._segments = this._segmenter.segment(fullText);
+        const segs = this._segmenter.segment(fullText);
+        for (const seg of segs) this._segments.push(seg);
+        this._commitBoundary = fullText.length;
         for (let i = 0; i < this._segments.length; i++) {
           this._show(i);
         }
       } else if (this._active) {
-        // Use authoritative full text, flush any remaining segments
+        // Use authoritative full text, commit all remaining
         if (fullText && fullText.trim()) this._textBuffer = fullText;
-        this._segments = this._segmenter.segment(this._textBuffer);
+        const tail = this._textBuffer.slice(this._commitBoundary);
+        if (tail.trim()) {
+          const finalSegs = this._segmenter.segment(tail);
+          for (const seg of finalSegs) this._segments.push(seg);
+          this._commitBoundary = this._textBuffer.length;
+        }
         for (let i = this._displayedIndex + 1; i < this._segments.length; i++) {
           this._show(i);
         }
@@ -1201,6 +1219,23 @@
       });
       if (this._renderer) this._renderer.hideImmediate();
       this._reset();
+    }
+
+    // ── Segmentation ──────────────────────────────────────────────────────
+
+    _appendNewSegments() {
+      const tail = this._textBuffer.slice(this._commitBoundary);
+      if (!tail.trim()) return;
+
+      const boundaries = this._segmenter.sentenceBoundaries(tail);
+      if (boundaries.length === 0) return;
+
+      const lastBoundary = boundaries[boundaries.length - 1];
+      const completeText = tail.slice(0, lastBoundary);
+      const newSegs = this._segmenter.segment(completeText);
+
+      for (const seg of newSegs) this._segments.push(seg);
+      this._commitBoundary += lastBoundary;
     }
 
     // ── Tick ──────────────────────────────────────────────────────────────
@@ -1264,6 +1299,7 @@
       this._active = false;
       this._textBuffer = '';
       this._segments = [];
+      this._commitBoundary = 0;
       this._displayedIndex = -1;
       this._displayedAt = 0;
       this._displayedLen = 0;
