@@ -798,16 +798,75 @@ captions: {
   maxCharsPerLine: 47,         // WCAG-friendly line width
   maxLines: 2,                 // lines per segment
   render: true,                // show built-in overlay (false = events only)
-  fontSize: 18,                // px, WCAG AA minimum
+  position: 'bottom',          // 'bottom' or 'top'
+  fontSize: 18,                // px or CSS value, WCAG AA minimum 18px
   fontFamily: 'system-ui, -apple-system, sans-serif',
   textColor: '#FFFFFF',
   backgroundColor: 'rgba(0,0,0,0.8)',
+  lineHeight: 1.4,             // line height multiplier
+  letterSpacing: null,         // CSS letter-spacing (e.g., '0.05em')
+  wordSpacing: null,           // CSS word-spacing (e.g., '0.1em')
+  textShadow: null,            // character edge effect (e.g., '2px 2px 4px #000')
+  textStroke: null,            // text outline (e.g., '1px black')
+  textAlign: 'center',         // 'center', 'left', or 'right'
+  padding: '8px 16px',         // inner padding of caption box
   fadeInMs: 120,               // segment appear transition
   fadeOutMs: 200,              // segment disappear transition
   holdAfterEndMs: 2000,        // hold last segment after speech ends
   container: null              // custom container element/selector (default: video container)
 }
 ```
+
+### Styling for ADA / CVAA Compliance
+
+Different accessibility regulations (ADA, CVAA, FCC) require user-customizable caption appearance. The SDK supports all standard caption styling properties:
+
+```javascript
+// Example: Large high-contrast captions with drop shadow edge
+sdk.setCaptionStyle({
+  fontSize: 24,
+  fontFamily: 'Arial, Helvetica, sans-serif',
+  textColor: '#FFFF00',
+  backgroundColor: 'rgba(0,0,0,0.9)',
+  textShadow: '2px 2px 4px rgba(0,0,0,1)',
+  lineHeight: 1.6,
+  position: 'bottom'
+});
+
+// Example: Outlined text on semi-transparent background
+sdk.setCaptionStyle({
+  textColor: '#FFFFFF',
+  backgroundColor: 'rgba(0,0,0,0.5)',
+  textStroke: '1px black',
+  fontSize: 20
+});
+
+// Example: Top-positioned, left-aligned for RTL-adjacent layouts
+sdk.setCaptionStyle({
+  position: 'top',
+  textAlign: 'left',
+  padding: '12px 24px'
+});
+```
+
+**`setCaptionStyle()` properties:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `fontSize` | `number \| string` | Font size in px or CSS value |
+| `fontFamily` | `string` | CSS font-family |
+| `textColor` | `string` | Text color (CSS color value) |
+| `backgroundColor` | `string` | Caption box background (CSS color value) |
+| `lineHeight` | `number \| string` | Line height multiplier or CSS value |
+| `letterSpacing` | `string` | CSS letter-spacing (e.g., `'0.05em'`) |
+| `wordSpacing` | `string` | CSS word-spacing |
+| `textShadow` | `string` | Drop shadow / edge effect (CSS text-shadow) |
+| `textStroke` | `string` | Text outline (CSS -webkit-text-stroke) |
+| `textAlign` | `'center' \| 'left' \| 'right'` | Horizontal alignment |
+| `padding` | `string` | Inner padding of caption box (CSS shorthand) |
+| `position` | `'bottom' \| 'top'` | Vertical position of captions |
+
+Set any property to `null` to revert to the CSS default.
 
 ### CSS Custom Properties
 
@@ -817,8 +876,17 @@ The built-in renderer uses CSS custom properties for theming. Override them on t
 |----------|---------|-------------|
 | `--kav-cc-bg` | `rgba(0,0,0,0.8)` | Caption background |
 | `--kav-cc-text` | `#FFFFFF` | Caption text color |
-| `--kav-cc-font` | `system-ui, -apple-system, sans-serif` | Font family |
+| `--kav-cc-font` | `system-ui, sans-serif` | Font family |
 | `--kav-cc-size` | `18px` | Font size |
+| `--kav-cc-line-height` | `1.4` | Line height |
+| `--kav-cc-letter-spacing` | `normal` | Letter spacing |
+| `--kav-cc-word-spacing` | `normal` | Word spacing |
+| `--kav-cc-text-shadow` | `none` | Character edge / drop shadow |
+| `--kav-cc-text-stroke` | `unset` | Text outline stroke |
+| `--kav-cc-text-align` | `center` | Text alignment |
+| `--kav-cc-padding` | `8px 16px` | Caption box inner padding |
+| `--kav-cc-padding-x` | `12.5%` | Horizontal margin from container edges |
+| `--kav-cc-align` | `center` | Container flex alignment |
 | `--kav-cc-fade-in` | `120ms` | Fade-in duration |
 | `--kav-cc-fade-out` | `200ms` | Fade-out duration |
 | `--kav-cc-lines` | `2` | Max lines (affects min-height) |

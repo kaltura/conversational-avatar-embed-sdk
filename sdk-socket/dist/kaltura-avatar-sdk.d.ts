@@ -242,7 +242,9 @@ export interface CaptionConfig {
   maxLines: number;
   /** SDK renders built-in caption overlay (default: true). Set false for custom UI. */
   render: boolean;
-  /** Font size in pixels (default: 18, minimum for WCAG AA) */
+  /** Vertical position: 'bottom' (default) or 'top' */
+  position: 'bottom' | 'top';
+  /** Font size in pixels or CSS value (default: 18, minimum for WCAG AA) */
   fontSize: number | string;
   /** Font family (default: 'system-ui, -apple-system, sans-serif') */
   fontFamily: string;
@@ -250,6 +252,20 @@ export interface CaptionConfig {
   textColor: string;
   /** Background color (default: 'rgba(0,0,0,0.8)') */
   backgroundColor: string;
+  /** Line height multiplier (default: 1.4) */
+  lineHeight: number | string | null;
+  /** CSS letter-spacing value (default: 'normal') */
+  letterSpacing: string | null;
+  /** CSS word-spacing value (default: 'normal') */
+  wordSpacing: string | null;
+  /** Text shadow for edge effects, e.g. '2px 2px 4px rgba(0,0,0,0.9)' (default: none) */
+  textShadow: string | null;
+  /** Text stroke for outlined text, e.g. '1px black' (default: unset) */
+  textStroke: string | null;
+  /** Text alignment: 'center' (default), 'left', 'right' */
+  textAlign: 'center' | 'left' | 'right' | null;
+  /** Inner padding of the caption box, CSS shorthand (default: '8px 16px') */
+  padding: string | null;
   /** Fade-in duration in ms (default: 120) */
   fadeInMs: number;
   /** Fade-out duration in ms (default: 200) */
@@ -265,6 +281,22 @@ export interface CaptionStyle {
   fontFamily?: string;
   textColor?: string;
   backgroundColor?: string;
+  /** Line height multiplier or CSS value */
+  lineHeight?: number | string | null;
+  /** CSS letter-spacing */
+  letterSpacing?: string | null;
+  /** CSS word-spacing */
+  wordSpacing?: string | null;
+  /** Text shadow for character edge effects */
+  textShadow?: string | null;
+  /** Text stroke for outlined characters */
+  textStroke?: string | null;
+  /** Text alignment */
+  textAlign?: 'center' | 'left' | 'right' | null;
+  /** Inner padding CSS shorthand */
+  padding?: string | null;
+  /** Vertical position */
+  position?: 'bottom' | 'top';
 }
 
 export interface CaptionStartPayload {

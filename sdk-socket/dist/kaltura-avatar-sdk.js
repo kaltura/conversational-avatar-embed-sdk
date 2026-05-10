@@ -596,8 +596,10 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   const CAPTION_CSS = `
-.kav-captions{position:absolute;bottom:0;left:0;right:0;display:flex;flex-direction:column;align-items:center;pointer-events:none;z-index:20;padding:0 12.5%}
-.kav-captions__track{background:var(--kav-cc-bg,rgba(0,0,0,0.8));color:var(--kav-cc-text,#FFFFFF);font-family:var(--kav-cc-font,system-ui,-apple-system,sans-serif);font-size:var(--kav-cc-size,18px);line-height:1.4;padding:8px 16px;border-radius:4px;margin-bottom:24px;max-width:100%;text-align:center;opacity:0;transition:opacity var(--kav-cc-fade-in,120ms) ease-in;min-height:calc(var(--kav-cc-size,18px) * 1.4 * var(--kav-cc-lines,2) + 16px);display:flex;align-items:center;justify-content:center}
+.kav-captions{position:absolute;left:0;right:0;display:flex;flex-direction:column;align-items:var(--kav-cc-align,center);pointer-events:none;z-index:20;padding:0 var(--kav-cc-padding-x,12.5%)}
+.kav-captions--bottom{bottom:0}
+.kav-captions--top{top:0}
+.kav-captions__track{background:var(--kav-cc-bg,rgba(0,0,0,0.8));color:var(--kav-cc-text,#FFFFFF);font-family:var(--kav-cc-font,system-ui,-apple-system,sans-serif);font-size:var(--kav-cc-size,18px);line-height:var(--kav-cc-line-height,1.4);letter-spacing:var(--kav-cc-letter-spacing,normal);word-spacing:var(--kav-cc-word-spacing,normal);padding:var(--kav-cc-padding,8px 16px);border-radius:4px;margin-bottom:24px;max-width:100%;text-align:var(--kav-cc-text-align,center);opacity:0;transition:opacity var(--kav-cc-fade-in,120ms) ease-in;min-height:calc(var(--kav-cc-size,18px) * var(--kav-cc-line-height,1.4) * var(--kav-cc-lines,2) + 16px);display:flex;align-items:center;justify-content:center;text-shadow:var(--kav-cc-text-shadow,none);-webkit-text-stroke:var(--kav-cc-text-stroke,unset)}
 .kav-captions__track--visible{opacity:1}
 .kav-captions__track--fading{opacity:0;transition:opacity var(--kav-cc-fade-out,200ms) ease-out}
 .kav-captions__toggle{position:absolute;bottom:8px;right:8px;pointer-events:all;min-width:44px;min-height:44px;width:44px;height:44px;border-radius:6px;border:none;background:rgba(0,0,0,0.6);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 150ms,outline 150ms}
@@ -759,8 +761,9 @@
       this._injectCSS();
       this._applyVars(parent);
 
+      const pos = this._config.position || 'bottom';
       this._root = document.createElement('div');
-      this._root.className = 'kav-captions';
+      this._root.className = 'kav-captions kav-captions--' + (pos === 'top' ? 'top' : 'bottom');
       this._root.setAttribute('role', 'region');
       this._root.setAttribute('aria-label', 'Closed captions');
       this._root.setAttribute('aria-live', 'off');
@@ -893,13 +896,23 @@
 
     _applyVars(parent) {
       const c = this._config;
-      if (c.fontSize) parent.style.setProperty('--kav-cc-size', typeof c.fontSize === 'number' ? c.fontSize + 'px' : c.fontSize);
-      if (c.fontFamily) parent.style.setProperty('--kav-cc-font', c.fontFamily);
-      if (c.textColor) parent.style.setProperty('--kav-cc-text', c.textColor);
-      if (c.backgroundColor) parent.style.setProperty('--kav-cc-bg', c.backgroundColor);
-      if (c.fadeInMs) parent.style.setProperty('--kav-cc-fade-in', c.fadeInMs + 'ms');
-      if (c.fadeOutMs) parent.style.setProperty('--kav-cc-fade-out', c.fadeOutMs + 'ms');
-      if (c.maxLines) parent.style.setProperty('--kav-cc-lines', String(c.maxLines));
+      const set = (prop, val) => { if (val != null) parent.style.setProperty(prop, val); };
+      set('--kav-cc-size', c.fontSize ? (typeof c.fontSize === 'number' ? c.fontSize + 'px' : c.fontSize) : null);
+      set('--kav-cc-font', c.fontFamily || null);
+      set('--kav-cc-text', c.textColor || null);
+      set('--kav-cc-bg', c.backgroundColor || null);
+      set('--kav-cc-fade-in', c.fadeInMs ? c.fadeInMs + 'ms' : null);
+      set('--kav-cc-fade-out', c.fadeOutMs ? c.fadeOutMs + 'ms' : null);
+      set('--kav-cc-lines', c.maxLines ? String(c.maxLines) : null);
+      set('--kav-cc-line-height', c.lineHeight ? String(c.lineHeight) : null);
+      set('--kav-cc-letter-spacing', c.letterSpacing || null);
+      set('--kav-cc-word-spacing', c.wordSpacing || null);
+      set('--kav-cc-text-shadow', c.textShadow || null);
+      set('--kav-cc-text-stroke', c.textStroke || null);
+      set('--kav-cc-text-align', c.textAlign || null);
+      set('--kav-cc-padding', c.padding || null);
+      set('--kav-cc-padding-x', c.paddingX || null);
+      set('--kav-cc-align', c.align || null);
     }
 
     _injectCSS() {
@@ -996,10 +1009,22 @@
       if (!this._renderer || !this._renderer._root) return;
       const parent = this._renderer._root.parentNode;
       if (!parent) return;
-      if (style.fontSize) parent.style.setProperty('--kav-cc-size', typeof style.fontSize === 'number' ? style.fontSize + 'px' : style.fontSize);
-      if (style.fontFamily) parent.style.setProperty('--kav-cc-font', style.fontFamily);
-      if (style.textColor) parent.style.setProperty('--kav-cc-text', style.textColor);
-      if (style.backgroundColor) parent.style.setProperty('--kav-cc-bg', style.backgroundColor);
+      const set = (prop, val) => { if (val !== undefined) parent.style.setProperty(prop, val === null ? '' : val); };
+      if (style.fontSize !== undefined) set('--kav-cc-size', typeof style.fontSize === 'number' ? style.fontSize + 'px' : style.fontSize);
+      if (style.fontFamily !== undefined) set('--kav-cc-font', style.fontFamily);
+      if (style.textColor !== undefined) set('--kav-cc-text', style.textColor);
+      if (style.backgroundColor !== undefined) set('--kav-cc-bg', style.backgroundColor);
+      if (style.lineHeight !== undefined) set('--kav-cc-line-height', style.lineHeight != null ? String(style.lineHeight) : null);
+      if (style.letterSpacing !== undefined) set('--kav-cc-letter-spacing', style.letterSpacing);
+      if (style.wordSpacing !== undefined) set('--kav-cc-word-spacing', style.wordSpacing);
+      if (style.textShadow !== undefined) set('--kav-cc-text-shadow', style.textShadow);
+      if (style.textStroke !== undefined) set('--kav-cc-text-stroke', style.textStroke);
+      if (style.textAlign !== undefined) set('--kav-cc-text-align', style.textAlign);
+      if (style.padding !== undefined) set('--kav-cc-padding', style.padding);
+      if (style.position !== undefined) {
+        this._renderer._root.classList.remove('kav-captions--top', 'kav-captions--bottom');
+        this._renderer._root.classList.add('kav-captions--' + (style.position === 'top' ? 'top' : 'bottom'));
+      }
     }
 
     setContainer(container) {
@@ -2611,10 +2636,18 @@
           maxCharsPerLine: config.captions?.maxCharsPerLine || 47,
           maxLines: config.captions?.maxLines || 2,
           render: config.captions?.render !== false,
+          position: config.captions?.position || 'bottom',
           fontSize: config.captions?.fontSize || 18,
           fontFamily: config.captions?.fontFamily || 'system-ui, -apple-system, sans-serif',
           textColor: config.captions?.textColor || '#FFFFFF',
           backgroundColor: config.captions?.backgroundColor || 'rgba(0,0,0,0.8)',
+          lineHeight: config.captions?.lineHeight || null,
+          letterSpacing: config.captions?.letterSpacing || null,
+          wordSpacing: config.captions?.wordSpacing || null,
+          textShadow: config.captions?.textShadow || null,
+          textStroke: config.captions?.textStroke || null,
+          textAlign: config.captions?.textAlign || null,
+          padding: config.captions?.padding || null,
           fadeInMs: config.captions?.fadeInMs || 120,
           fadeOutMs: config.captions?.fadeOutMs || 200,
           holdAfterEndMs: config.captions?.holdAfterEndMs || 2000,
