@@ -3019,10 +3019,16 @@
 
         this._socket.on('debug_stvTaskGenerated', (data) => {
           if (data?.text) {
-            _beforeBuffer += data.text;
+            // Server sends cumulative text (full response so far), not just the new delta.
+            // Extract the delta by comparing with what we already have.
+            let delta = data.text;
+            if (data.text.length > _beforeBuffer.length && data.text.startsWith(_beforeBuffer)) {
+              delta = data.text.slice(_beforeBuffer.length);
+            }
+            _beforeBuffer = data.text;
             this._commands.check(_beforeBuffer, 'before');
-            this._emitter.emit(Events.AVATAR_TEXT_READY, { text: data.text, fullText: _beforeBuffer });
-            this._captions.onChunk(data.text, data.speechId);
+            this._emitter.emit(Events.AVATAR_TEXT_READY, { text: delta, fullText: _beforeBuffer });
+            this._captions.onChunk(delta, data.speechId);
           }
         });
 
