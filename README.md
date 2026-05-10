@@ -135,7 +135,7 @@ Run any demo locally: `python3 -m http.server 8080`
 sdk-socket/             ← Socket SDK: Direct Socket.IO + WebRTC
   ├── src/              ← Source code
   ├── dist/             ← Production bundle + TypeScript declarations
-  ├── tests/            ← 125 Playwright tests
+  ├── tests/            ← 195 Playwright tests
   └── examples/demo/    ← Interactive demo
 
 sdk-iframe/             ← Iframe SDK: Sandboxed iframe embed
@@ -153,7 +153,7 @@ sdk-iframe/             ← Iframe SDK: Sandboxed iframe embed
 
 ```bash
 npm test                   # All tests (Iframe E2E + Socket unit)
-cd sdk-socket && npm test  # Socket SDK only (125 tests, ~2 seconds)
+cd sdk-socket && npm test  # Socket SDK only (195 tests, ~15 seconds)
 npm run test:iframe        # Iframe SDK E2E only
 ```
 

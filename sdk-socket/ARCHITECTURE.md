@@ -6,14 +6,14 @@ Internal reference for developers and AI agents contributing to `sdk-socket/src/
 
 ## File Structure
 
-The entire SDK is a single 2700-line UMD file. No build step, no bundler, no transpilation. The dist file is a direct copy of the source.
+The entire SDK is a single ~3600-line UMD file. No build step, no bundler, no transpilation. The dist file is a direct copy of the source.
 
 ```
 sdk-socket/
 ├── src/kaltura-avatar-sdk.js     ← Single source file (edit this)
 ├── dist/kaltura-avatar-sdk.js    ← Exact copy of src (commit both)
 ├── dist/kaltura-avatar-sdk.d.ts  ← TypeScript declarations (manual)
-├── tests/e2e/sdk-unit.spec.js    ← 146 Playwright-based unit tests
+├── tests/e2e/sdk-unit.spec.js    ← 195 Playwright-based unit tests
 ├── examples/demo/index.html      ← Interactive demo
 └── package.json
 ```
@@ -35,6 +35,7 @@ All classes are defined inside the UMD factory function (not exported individual
 | `ReconnectStrategy` | Exponential backoff with jitter |
 | `TranscriptManager` | Records speech, formats, exports |
 | `CommandRegistry` | Pattern-matching on avatar speech with timing control |
+| `CaptionFilter` | TTS word replacements + punctuation normalization for display text |
 | `DPPManager` | Validates and emits Dynamic Prompt Injection |
 | `MicrophoneManager` | getUserMedia wrapper with mute/unmute |
 | `WHEPClient` | WebRTC-HTTP Egress Protocol for avatar video |
@@ -113,11 +114,12 @@ Server sends avatar speech in two phases:
 Server → 'debug_stvTaskGenerated' (chunks, BEFORE audio plays)
        │
        ▼
-┌─────────────────────────────────────────┐
-│ Accumulate in _beforeBuffer             │
-│ CommandRegistry.check(buffer, 'before') │
-│ Emit AVATAR_TEXT_READY { text, fullText}│
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│ Detect cumulative vs. delta text, accumulate buffer  │
+│ CommandRegistry.check(_beforeBuffer, 'before')       │
+│ Emit AVATAR_TEXT_READY { text: delta, fullText }     │
+│ CaptionManager.onChunk(delta, speechId)              │
+└──────────────────────────────────────────────────────┘
 
 Server → 'stvStartedTalking' (avatar lips start moving)
        │
@@ -199,17 +201,18 @@ Categories:
 debug_stvTaskGenerated { text, speechId }   ← text chunks arrive BEFORE audio
        │
        ▼
-CaptionManager.onChunk(text, speechId)
-  • Buffer text, track by responseId (= speechId)
-  • If new responseId: emit 'caption-start', interrupt previous
-  • Re-segment buffer (but don't display yet)
+CaptionManager.onChunk(delta, speechId)
+  • _textBuffer += delta
+  • If new speechId: emit 'caption-start', interrupt previous
+  • _appendNewSegments(): commit text up to last sentence boundary
+    (segments are APPEND-ONLY — never rebuilt or mutated)
 
 stvStartedTalking                           ← audio playback begins
        │
        ▼
 CaptionManager.onSpeakingStart()
   • Record start timestamp (t₀)
-  • Segment buffered text, show segment[0] if complete
+  • _appendNewSegments(), show segment[0] if complete
   • Start 200ms tick
 
 tick (every 200ms)                          ← timing loop
@@ -222,16 +225,18 @@ tick (every 200ms)                          ← timing loop
 debug_stvTaskGenerated (while speaking)     ← more chunks stream in
        │
        ▼
-CaptionManager.onChunk(text, speechId)
-  • Append to buffer, re-segment
-  • Tick will pick up new trailing segments naturally
+CaptionManager.onChunk(delta, speechId)
+  • _textBuffer += delta
+  • _appendNewSegments(): new complete sentences become new segments
+  • Tick picks up new trailing segments naturally
 
 stvFinishedTalking { agentContent }         ← audio ends
        │
        ▼
 CaptionManager.onSpeakingEnd(fullText)
   • Stop tick
-  • Flush any remaining segments immediately
+  • Commit ALL remaining uncommitted text (flush)
+  • Show all unseen segments immediately
   • Calibrate rate: actualDuration / totalChars → chars/sec (EMA α=0.3)
   • Emit 'caption-end'
   • Hold last segment visible (default 2s), then fade out
@@ -246,12 +251,16 @@ CaptionManager.interrupt()
 ```
 
 **Key design decisions:**
+- **Append-only segments:** `_segments[]` is never rebuilt. Once a segment is committed it never changes. This eliminates display-index drift that caused skipped content.
+- **Commit boundary:** `_commitBoundary` tracks how many chars of `_textBuffer` have been consumed into segments. Only text up to the last sentence boundary is committed (incomplete trailing text waits for more chunks).
+- **Delta accumulation:** The socket handler detects whether the server sends cumulative or delta text and accumulates `_beforeBuffer` correctly in both modes.
 - Text arrives BEFORE audio → chunks buffer silently until speaking starts
 - First segment only shown when it ends at a natural boundary (sentence punctuation or segmenter split)
 - No word-level timing from server → tick-based advancement using chars/sec rate
 - Default rate: 11 chars/sec; calibrates from observed speaking duration after each utterance
 - Rate calibration converges after 2-3 utterances via exponential moving average (α=0.3)
 - Each segment's display time is self-contained (its own char count / rate) — no cumulative drift
+- **Caption filter:** `CaptionFilter` reverses TTS phonetic spellings (word-boundary-aware, longest-match-first) and normalizes punctuation/spacing before display
 - `aria-live="off"` when audio audible (deaf/HoH read visually); switches to `aria-live="polite"` when video muted
 - Toggle state announced to screen readers via `role="status"` live region
 - User toggle preference persisted in localStorage
@@ -346,7 +355,7 @@ Tests run in a real browser (Chromium) via Playwright. The SDK is loaded into th
 
 ```bash
 cd sdk-socket
-npm test           # 146 tests, ~2.5 seconds
+npm test           # 195 tests, ~15 seconds
 npm run test:live  # Live server integration tests
 npm run test:all   # Everything
 ```
@@ -384,6 +393,7 @@ Test structure:
 | `@latest` still shows old version | jsDelivr metadata cache is ~10min | Wait, then purge |
 | Recreated tag doesn't update CDN | jsDelivr S3 snapshot is permanent | Never reuse versions |
 | Buffer reset clears first chunk | `stvStartedTalking` fires AFTER chunks arrive | Only reset on `stvFinishedTalking` |
+| Command fires on partial text | Server sends deltas not cumulative | Handler detects mode and appends; use `debounce` for incremental commands |
 | Intro speech clipped | `approvedPermissions` fired before video ready | Wait for canplay + 300ms |
 | Avatar freezes on contact request | Server waits for `contactInfoReceived`/`Rejected` | Always provide submit AND skip path |
 | GenUI video triggers "are you there" | Server silence detection fires during video | Mute mic + pause conversation |

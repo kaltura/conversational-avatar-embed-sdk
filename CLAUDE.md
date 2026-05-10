@@ -50,7 +50,7 @@ Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowle
 ```bash
 cd sdk-socket
 npm install
-npm test          # 191 unit + GenUI + caption tests (~12s)
+npm test          # 195 unit + GenUI + caption tests (~15s)
 npm run test:all  # All including live integration
 ```
 

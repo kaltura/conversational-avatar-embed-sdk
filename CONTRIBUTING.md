@@ -10,7 +10,7 @@ Guidelines for humans and AI agents working on this repository.
 ├── sdk-socket/            ← Socket SDK (Direct Socket.IO + WebRTC)
 │   ├── src/               ← Source (single UMD file — edit this)
 │   ├── dist/              ← Built output (copy of src + .d.ts)
-│   ├── tests/             ← Playwright tests (146 tests)
+│   ├── tests/             ← Playwright tests (195 tests)
 │   ├── examples/demo/     ← Interactive demo app
 │   ├── ARCHITECTURE.md    ← Internal architecture reference
 │   └── README.md          ← Developer-facing documentation
@@ -128,7 +128,7 @@ Tests run in Chromium via Playwright. Each test creates a fresh SDK instance wit
 ```bash
 cd sdk-socket
 npm install              # First time only
-npm test                 # 146 tests, ~2.5 seconds
+npm test                 # 195 tests, ~15 seconds
 npm run test:live        # Live server tests (needs credentials)
 npm run test:all         # Everything
 ```
@@ -196,7 +196,7 @@ sdk-iframe/examples/your_demo/
 ## CI
 
 GitHub Actions runs on every push and PR:
-- **test-socket**: 146 unit + GenUI tests
+- **test-socket**: 195 unit + GenUI + caption tests
 - **test-iframe**: HR Avatar and Code Interview E2E tests
 - **lint**: File size checks, JSON schema validation
 

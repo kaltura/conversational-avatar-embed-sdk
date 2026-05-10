@@ -1061,7 +1061,7 @@ Requires: WebRTC, getUserMedia, fetch API
 ```bash
 cd sdk-socket
 npm install
-npm test           # Unit + GenUI tests (125 tests, runs in ~2 seconds)
+npm test           # Unit + GenUI + caption tests (195 tests, ~15 seconds)
 npm run test:live  # Live integration tests (connects to real server)
 npm run test:all   # All tests
 ```
