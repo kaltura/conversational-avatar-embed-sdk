@@ -88,8 +88,10 @@ Demos run on any static server: `python3 -m http.server 8080`
 ## Release Process
 
 See `CONTRIBUTING.md` for the full checklist. The critical points:
-1. Sync 3 version strings
+1. Sync 3 version strings (`@version` header, `const VERSION`, `package.json`)
 2. Copy src → dist
 3. Tests pass
 4. Commit, push, `gh release create vX.Y.Z`
 5. Wait 10 min, purge jsDelivr, verify `x-jsd-version` header
+
+**IMPORTANT: Always create a release tag and verify CDN deployment after pushing changes.** jsDelivr's `@latest` resolves to the latest GitHub release tag, not the latest commit. Without a release, changes are invisible to CDN consumers. Every version bump must be followed by `gh release create` + jsDelivr purge + verification.
