@@ -746,6 +746,57 @@ sdk.isCaptionToggleVisible();        // check visibility
 
 Segments are displayed at a default rate of 11 characters/second. After the first utterance, the SDK calibrates the rate from actual observed speaking duration using an exponential moving average. This self-tunes within 2-3 utterances to match the avatar's actual speaking pace.
 
+### Caption Filters (TTS Correction)
+
+Avatar LLMs are often instructed to spell words phonetically so the TTS engine pronounces them correctly (e.g., "Kalturah" instead of "Kaltura", "eebeetdaa" instead of "EBITDA"). The caption filter reverses these substitutions for display, and auto-corrects punctuation/spacing issues.
+
+**At construction:**
+
+```javascript
+const sdk = new KalturaAvatarSDK({
+  clientId, flowId, container: '#avatar',
+  captions: {
+    enabled: true,
+    replacements: {
+      'Kalturah': 'Kaltura',
+      'eebeetdaa': 'EBITDA',
+      'gap': 'GAAP',
+      'none gap': 'Non-GAAP',
+      'eSelf': 'eSelf.ai',
+      'Path Factory': 'PathFactory'
+    }
+  }
+});
+```
+
+**At runtime:**
+
+```javascript
+// Set or update replacements (replaces previous map entirely)
+sdk.setCaptionReplacements({
+  'Kalturah': 'Kaltura',
+  'eebeetdaa': 'EBITDA',
+  'gap': 'GAAP',
+  'none gap': 'Non-GAAP'
+});
+
+// Custom filter function (runs after replacements + punctuation normalization)
+sdk.setCaptionFilter((text) => {
+  // Example: capitalize company names
+  return text.replace(/kaltura/gi, 'Kaltura');
+});
+
+// Remove custom filter
+sdk.setCaptionFilter(null);
+```
+
+**Built-in punctuation normalization** (always active):
+- Adds missing space after `.` `!` `?` `,` `;` `:` when followed by a letter
+- Removes extra spaces before punctuation
+- Collapses multiple spaces into one
+
+Matching is case-insensitive. The replacements map can be a plain object or a `Map`. The `caption-segment` event payload contains the filtered text.
+
 ### Custom Rendering
 
 Set `render: false` to disable the built-in overlay and render captions yourself:

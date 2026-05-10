@@ -274,6 +274,10 @@ export interface CaptionConfig {
   holdAfterEndMs: number;
   /** Custom container for captions (default: same as video container) */
   container: string | HTMLElement | null;
+  /** TTS-to-display word replacements map. Keys are TTS spellings, values are display text. Case-insensitive matching. */
+  replacements: Record<string, string> | null;
+  /** Custom filter function applied after replacements and punctuation normalization. Return filtered string. */
+  filter: ((text: string) => string) | null;
 }
 
 export interface CaptionStyle {
@@ -587,6 +591,10 @@ export declare class KalturaAvatarSDK {
   setCaptionToggleVisible(visible: boolean): void;
   /** Check if the CC toggle button is currently visible */
   isCaptionToggleVisible(): boolean;
+  /** Set TTS-to-display word replacements (case-insensitive). Keys are TTS spellings, values are correct display text. */
+  setCaptionReplacements(map: Record<string, string>): void;
+  /** Set a custom filter function applied to each caption segment before display */
+  setCaptionFilter(fn: ((text: string) => string) | null): void;
 
   // ── Contact Collection (convenience) ──
   /** Submit contact info to server (convenience method for custom contact forms) */

@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.4.3
+ * @version 2.4.4
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.4.3';
+  const VERSION = '2.4.4';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -615,6 +615,59 @@
 
   const CC_ICON_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M2 4c0-1.1.9-2 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6l-4 4V4zm5 5a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-.5H9.5V14H7v-4h2.5v-.5H10v-.5a1 1 0 0 0-1-1H7zm6 0a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-.5h-1.5V14H13v-4h2.5v-.5H16v-.5a1 1 0 0 0-1-1h-2z"/></svg>';
 
+  class CaptionFilter {
+    constructor(config) {
+      this._replacements = [];
+      this._customFn = null;
+      if (config?.replacements) this.setReplacements(config.replacements);
+      if (config?.filter) this._customFn = config.filter;
+    }
+
+    setReplacements(map) {
+      this._replacements = [];
+      if (!map) return;
+      const entries = map instanceof Map ? Array.from(map.entries()) : Object.entries(map);
+      entries.sort((a, b) => b[0].length - a[0].length);
+      for (const [from, to] of entries) {
+        const escaped = this._escapeRegex(from);
+        const startsWord = /^[a-zA-ZÀ-ɏ]/.test(from);
+        const endsWord = /[a-zA-ZÀ-ɏ]$/.test(from);
+        const pattern = (startsWord ? '\\b' : '') + escaped + (endsWord ? '\\b' : '');
+        this._replacements.push({ re: new RegExp(pattern, 'gi'), to });
+      }
+    }
+
+    setFilter(fn) {
+      this._customFn = typeof fn === 'function' ? fn : null;
+    }
+
+    apply(text) {
+      if (!text) return text;
+      let result = text;
+      for (const { re, to } of this._replacements) {
+        result = result.replace(re, to);
+      }
+      result = this._normalizePunctuation(result);
+      if (this._customFn) {
+        const filtered = this._customFn(result);
+        if (typeof filtered === 'string') result = filtered;
+      }
+      return result;
+    }
+
+    _normalizePunctuation(text) {
+      let t = text;
+      t = t.replace(/([.!?,;:])([A-Za-zÀ-ɏ])/g, '$1 $2');
+      t = t.replace(/ {2,}/g, ' ');
+      t = t.replace(/\s+([.!?,;:])/g, '$1');
+      return t.trim();
+    }
+
+    _escapeRegex(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+
   class CaptionSegmenter {
     constructor(maxCharsPerLine, maxLines) {
       this._maxCharsPerLine = maxCharsPerLine;
@@ -967,6 +1020,7 @@
       this._segmenter = new CaptionSegmenter(this._maxCharsPerLine, this._maxLines);
       this._scheduler = new CaptionScheduler();
       this._rate = new CaptionRateEstimator();
+      this._filter = new CaptionFilter(c);
       this._renderer = this._render ? new CaptionRenderer(c) : null;
 
       this._responseId = null;
@@ -1039,6 +1093,14 @@
 
     isToggleVisible() {
       return this._renderer ? this._renderer.isToggleVisible() : false;
+    }
+
+    setReplacements(map) {
+      this._filter.setReplacements(map);
+    }
+
+    setFilter(fn) {
+      this._filter.setFilter(fn);
     }
 
     onChunk(text, speechId) {
@@ -1176,13 +1238,14 @@
 
     _show(index) {
       if (index <= this._displayedIndex) return;
-      const text = this._segments[index];
-      if (!text) return;
+      const raw = this._segments[index];
+      if (!raw) return;
 
       this._displayedIndex = index;
       this._displayedAt = Date.now();
-      this._displayedLen = text.length;
+      this._displayedLen = raw.length;
 
+      const text = this._filter.apply(raw);
       this._emitter.emit(Events.CAPTION_SEGMENT, {
         text,
         index,
@@ -2651,7 +2714,9 @@
           fadeInMs: config.captions?.fadeInMs || 120,
           fadeOutMs: config.captions?.fadeOutMs || 200,
           holdAfterEndMs: config.captions?.holdAfterEndMs || 2000,
-          container: config.captions?.container || null
+          container: config.captions?.container || null,
+          replacements: config.captions?.replacements || null,
+          filter: config.captions?.filter || null
         })
       });
 
@@ -2966,6 +3031,8 @@
     setCaptionContainer(container) { this._captions.setContainer(container); }
     setCaptionToggleVisible(visible) { this._captions.setToggleVisible(visible); }
     isCaptionToggleVisible() { return this._captions.isToggleVisible(); }
+    setCaptionReplacements(map) { this._captions.setReplacements(map); }
+    setCaptionFilter(fn) { this._captions.setFilter(fn); }
 
     // ─────────────────────────────────────────────────────────────────────────
     // INTERNAL: SOCKET INITIALIZATION
@@ -3482,7 +3549,7 @@
 
   // Expose internals for advanced use and testing
   KalturaAvatarSDK.AvatarError = AvatarError;
-  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader, CaptionManager, CaptionSegmenter, CaptionScheduler, CaptionRateEstimator, CaptionRenderer };
+  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader, CaptionManager, CaptionSegmenter, CaptionScheduler, CaptionRateEstimator, CaptionRenderer, CaptionFilter };
 
   return KalturaAvatarSDK;
 }));

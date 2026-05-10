@@ -1419,4 +1419,87 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     // Only the first segment fires immediately; the rest should be cancelled
     expect(result.postCount).toBeLessThanOrEqual(result.preCount);
   });
+
+  test('caption filter applies TTS replacements (case-insensitive)', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionFilter } = KalturaAvatarSDK._internals;
+      const f = new CaptionFilter({
+        replacements: { 'Kalturah': 'Kaltura', 'eebeetdaa': 'EBITDA', 'gap': 'GAAP', 'none gap': 'Non-GAAP' }
+      });
+      return [
+        f.apply('Welcome to Kalturah, where we track eebeetdaa metrics.'),
+        f.apply('Our none gap revenue grew faster than gap revenue.'),
+        f.apply('KALTURAH is great')
+      ];
+    });
+    expect(result[0]).toBe('Welcome to Kaltura, where we track EBITDA metrics.');
+    expect(result[1]).toBe('Our Non-GAAP revenue grew faster than GAAP revenue.');
+    expect(result[2]).toBe('Kaltura is great');
+  });
+
+  test('caption filter normalizes punctuation spacing', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionFilter } = KalturaAvatarSDK._internals;
+      const f = new CaptionFilter({});
+      return [
+        f.apply('Hello.World'),
+        f.apply('Hello ,world'),
+        f.apply('Hi.  How are you?Good thanks!Really?'),
+        f.apply('Normal sentence. With spaces.')
+      ];
+    });
+    expect(result[0]).toBe('Hello. World');
+    expect(result[1]).toBe('Hello, world');
+    expect(result[2]).toBe('Hi. How are you? Good thanks! Really?');
+    expect(result[3]).toBe('Normal sentence. With spaces.');
+  });
+
+  test('caption filter applies custom function after replacements', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionFilter } = KalturaAvatarSDK._internals;
+      const f = new CaptionFilter({
+        replacements: { 'eebeetdaa': 'EBITDA' },
+        filter: (text) => text.toUpperCase()
+      });
+      return f.apply('Our eebeetdaa is strong.');
+    });
+    expect(result).toBe('OUR EBITDA IS STRONG.');
+  });
+
+  test('caption filter integrates with CaptionManager segment events', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, {
+          enabled: true, render: false,
+          replacements: { 'Kalturah': 'Kaltura', 'eebeetdaa': 'EBITDA' }
+        }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => segments.push(p.text));
+        cm.onChunk('Welcome to Kalturah. Our eebeetdaa is strong.', 's1');
+        cm.onSpeakingStart();
+        setTimeout(() => resolve(segments), 1500);
+      });
+    });
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.join(' ')).toContain('Kaltura');
+    expect(result.join(' ')).toContain('EBITDA');
+    expect(result.join(' ')).not.toContain('Kalturah');
+    expect(result.join(' ')).not.toContain('eebeetdaa');
+  });
+
+  test('setCaptionReplacements updates filter at runtime', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionFilter } = KalturaAvatarSDK._internals;
+      const f = new CaptionFilter({});
+      // Initially no replacements
+      const before = f.apply('The gap revenue is up.');
+      f.setReplacements({ 'gap': 'GAAP' });
+      const after = f.apply('The gap revenue is up.');
+      return { before, after };
+    });
+    expect(result.before).toBe('The gap revenue is up.');
+    expect(result.after).toBe('The GAAP revenue is up.');
+  });
 });
