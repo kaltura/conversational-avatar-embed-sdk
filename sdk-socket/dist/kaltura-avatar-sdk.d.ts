@@ -32,6 +32,8 @@ export interface AvatarConfig {
   peerName?: string;
   /** GenUI rendering configuration */
   genui?: Partial<GenUIConfig>;
+  /** Closed captions configuration */
+  captions?: Partial<CaptionConfig>;
 }
 
 export interface EndpointConfig {
@@ -231,6 +233,61 @@ export interface GenUIErrorPayload {
   error: Error;
 }
 
+export interface CaptionConfig {
+  /** Enable caption events. undefined = check localStorage for user preference; true/false = explicit. */
+  enabled?: boolean;
+  /** Maximum characters per line (default: 47) */
+  maxCharsPerLine: number;
+  /** Maximum lines per segment (default: 2) */
+  maxLines: number;
+  /** SDK renders built-in caption overlay (default: true). Set false for custom UI. */
+  render: boolean;
+  /** Font size in pixels (default: 18, minimum for WCAG AA) */
+  fontSize: number | string;
+  /** Font family (default: 'system-ui, -apple-system, sans-serif') */
+  fontFamily: string;
+  /** Text color (default: '#FFFFFF') */
+  textColor: string;
+  /** Background color (default: 'rgba(0,0,0,0.8)') */
+  backgroundColor: string;
+  /** Fade-in duration in ms (default: 120) */
+  fadeInMs: number;
+  /** Fade-out duration in ms (default: 200) */
+  fadeOutMs: number;
+  /** Hold last segment visible after caption-end in ms (default: 2000) */
+  holdAfterEndMs: number;
+  /** Custom container for captions (default: same as video container) */
+  container: string | HTMLElement | null;
+}
+
+export interface CaptionStyle {
+  fontSize?: number | string;
+  fontFamily?: string;
+  textColor?: string;
+  backgroundColor?: string;
+}
+
+export interface CaptionStartPayload {
+  responseId: string;
+}
+
+export interface CaptionSegmentPayload {
+  text: string;
+  index: number;
+  total: number;
+  isFinal: boolean;
+  responseId: string;
+}
+
+export interface CaptionEndPayload {
+  responseId: string;
+}
+
+export interface CaptionInterruptedPayload {
+  responseId: string;
+  lastSegmentIndex: number;
+}
+
 export interface ReconnectingPayload {
   attempt: number;
   maxAttempts: number;
@@ -336,6 +393,11 @@ export interface AvatarEventMap {
   'genui:error': GenUIErrorPayload;
   'command-matched': CommandMatch;
   'transcript-entry': TranscriptEntry;
+
+  'caption-start': CaptionStartPayload;
+  'caption-segment': CaptionSegmentPayload;
+  'caption-end': CaptionEndPayload;
+  'caption-interrupted': CaptionInterruptedPayload;
 
   'reconnecting': ReconnectingPayload;
   'reconnected': void;
@@ -480,6 +542,14 @@ export declare class KalturaAvatarSDK {
   /** Check if GenUI rendering is enabled */
   isGenUIEnabled(): boolean;
 
+  // ── Closed Captions ──
+  /** Enable or disable closed captions */
+  setCaptionsEnabled(enabled: boolean): void;
+  /** Check if closed captions are enabled */
+  isCaptionsEnabled(): boolean;
+  /** Override caption display styles at runtime */
+  setCaptionStyle(style: Partial<CaptionStyle>): void;
+
   // ── Contact Collection (convenience) ──
   /** Submit contact info to server (convenience method for custom contact forms) */
   submitContact(type: 'email' | 'phone', value: string): void;
@@ -513,6 +583,10 @@ declare const AvatarEvents: {
   readonly GENUI_ERROR: 'genui:error';
   readonly COMMAND_MATCHED: 'command-matched';
   readonly TRANSCRIPT_ENTRY: 'transcript-entry';
+  readonly CAPTION_START: 'caption-start';
+  readonly CAPTION_SEGMENT: 'caption-segment';
+  readonly CAPTION_END: 'caption-end';
+  readonly CAPTION_INTERRUPTED: 'caption-interrupted';
   readonly RECONNECTING: 'reconnecting';
   readonly RECONNECTED: 'reconnected';
   readonly SERVER_CONNECTED: 'server-connected';

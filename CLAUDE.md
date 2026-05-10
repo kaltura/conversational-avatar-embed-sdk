@@ -31,7 +31,7 @@ Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowle
 - Types: `sdk-socket/dist/kaltura-avatar-sdk.d.ts`
 - Architecture: `sdk-socket/ARCHITECTURE.md`
 - Demo: `sdk-socket/examples/demo/index.html`
-- Tests: `sdk-socket/tests/e2e/` (146 tests via Playwright)
+- Tests: `sdk-socket/tests/e2e/` (186 tests via Playwright)
 - Peer dependency: Socket.IO client v4
 
 ### Key Socket SDK Patterns
@@ -42,14 +42,15 @@ Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowle
 4. **Commands**: `sdk.registerCommand(name, pattern, handler, { timing })` — before/after/both
 5. **GenUI**: Built-in renderers for charts, tables, videos, code, diagrams, etc.
 6. **Transcript**: `sdk.getTranscript()`, `sdk.downloadTranscript()`
-7. **Contact**: `sdk.submitContact(type, value)` / `sdk.rejectContact(type)` — must call one or avatar hangs
+7. **Captions**: `captions: { enabled: true }` — WCAG 2.1 AA closed captions with built-in renderer, tick-based timing, rate auto-calibration
+8. **Contact**: `sdk.submitContact(type, value)` / `sdk.rejectContact(type)` — must call one or avatar hangs
 
 ### Running Socket SDK Tests
 
 ```bash
 cd sdk-socket
 npm install
-npm test          # 146 unit + GenUI tests (~2.5s)
+npm test          # 186 unit + GenUI + caption tests (~12s)
 npm run test:all  # All including live integration
 ```
 

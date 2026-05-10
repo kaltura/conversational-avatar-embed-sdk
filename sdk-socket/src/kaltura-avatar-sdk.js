@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.3.8
+ * @version 2.4.0
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.3.8';
+  const VERSION = '2.4.0';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -64,6 +64,11 @@
     GENUI_ERROR: 'genui:error',
     COMMAND_MATCHED: 'command-matched',
     TRANSCRIPT_ENTRY: 'transcript-entry',
+
+    CAPTION_START: 'caption-start',
+    CAPTION_SEGMENT: 'caption-segment',
+    CAPTION_END: 'caption-end',
+    CAPTION_INTERRUPTED: 'caption-interrupted',
 
     RECONNECTING: 'reconnecting',
     RECONNECTED: 'reconnected',
@@ -583,6 +588,580 @@
 
     list() {
       return [...this._commands.keys()];
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CAPTION MANAGER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const CAPTION_CSS = `
+.kav-captions{position:absolute;bottom:0;left:0;right:0;display:flex;flex-direction:column;align-items:center;pointer-events:none;z-index:20;padding:0 12.5%}
+.kav-captions__track{background:var(--kav-cc-bg,rgba(0,0,0,0.8));color:var(--kav-cc-text,#FFFFFF);font-family:var(--kav-cc-font,system-ui,-apple-system,sans-serif);font-size:var(--kav-cc-size,18px);line-height:1.4;padding:8px 16px;border-radius:4px;margin-bottom:24px;max-width:100%;text-align:center;opacity:0;transition:opacity var(--kav-cc-fade-in,120ms) ease-in;min-height:calc(var(--kav-cc-size,18px) * 1.4 * var(--kav-cc-lines,2) + 16px);display:flex;align-items:center;justify-content:center}
+.kav-captions__track--visible{opacity:1}
+.kav-captions__track--fading{opacity:0;transition:opacity var(--kav-cc-fade-out,200ms) ease-out}
+.kav-captions__toggle{position:absolute;bottom:8px;right:8px;pointer-events:all;min-width:44px;min-height:44px;width:44px;height:44px;border-radius:6px;border:none;background:rgba(0,0,0,0.6);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 150ms,outline 150ms}
+.kav-captions__toggle:hover{background:rgba(0,0,0,0.8)}
+.kav-captions__toggle:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.kav-captions__toggle[aria-checked="false"]{opacity:0.5}
+.kav-captions__toggle[aria-checked="false"]:hover{opacity:0.8}
+.kav-captions__status{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+@media(forced-colors:active){.kav-captions__track{border:2px solid CanvasText}.kav-captions__toggle{border:2px solid ButtonText}}
+@media(prefers-reduced-motion:reduce){.kav-captions__track,.kav-captions__toggle{transition:none}}
+@media(max-width:600px){.kav-captions__track{font-size:20px;padding:6px 12px}.kav-captions{padding:0 5%}}
+`;
+
+  const CC_ICON_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M2 4c0-1.1.9-2 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6l-4 4V4zm5 5a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-.5H9.5V14H7v-4h2.5v-.5H10v-.5a1 1 0 0 0-1-1H7zm6 0a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-.5h-1.5V14H13v-4h2.5v-.5H16v-.5a1 1 0 0 0-1-1h-2z"/></svg>';
+
+  class CaptionSegmenter {
+    constructor(maxCharsPerLine, maxLines) {
+      this._maxCharsPerLine = maxCharsPerLine;
+      this._maxLines = maxLines;
+      this._maxChars = maxCharsPerLine * maxLines;
+    }
+
+    segment(text) {
+      if (!text || !text.trim()) return [];
+      const sentences = this._splitSentences(text.trim());
+      const segments = [];
+      let buffer = '';
+
+      for (const sentence of sentences) {
+        if (!sentence.trim()) continue;
+
+        if (buffer && (buffer.length + sentence.length + 1) > this._maxChars) {
+          segments.push(buffer.trim());
+          buffer = '';
+        }
+
+        if (sentence.length > this._maxChars) {
+          if (buffer) { segments.push(buffer.trim()); buffer = ''; }
+          const clauses = this._splitClauses(sentence);
+          for (const clause of clauses) {
+            if (buffer && (buffer.length + clause.length + 1) > this._maxChars) {
+              segments.push(buffer.trim());
+              buffer = '';
+            }
+            if (clause.length > this._maxChars) {
+              if (buffer) { segments.push(buffer.trim()); buffer = ''; }
+              const words = clause.split(/\s+/);
+              for (const word of words) {
+                if (buffer && (buffer.length + word.length + 1) > this._maxChars) {
+                  segments.push(buffer.trim());
+                  buffer = '';
+                }
+                buffer = buffer ? buffer + ' ' + word : word;
+              }
+            } else {
+              buffer = buffer ? buffer + ' ' + clause : clause;
+            }
+          }
+        } else {
+          buffer = buffer ? buffer + ' ' + sentence : sentence;
+        }
+      }
+
+      if (buffer.trim()) segments.push(buffer.trim());
+      return segments.length > 0 ? segments : [text.trim()];
+    }
+
+    _splitSentences(text) {
+      const result = [];
+      // Match sentence-ending punctuation followed by space+uppercase or end-of-string
+      const boundaries = [];
+      const re = /[.!?]+/g;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        const endPos = m.index + m[0].length;
+        if (this._isSentenceEnd(text, m.index, endPos)) {
+          boundaries.push(endPos);
+        }
+      }
+      if (boundaries.length === 0) return [text];
+      let start = 0;
+      for (const end of boundaries) {
+        const segment = text.slice(start, end).trim();
+        if (segment) result.push(segment);
+        start = end;
+      }
+      if (start < text.length) {
+        const remainder = text.slice(start).trim();
+        if (remainder) result.push(remainder);
+      }
+      return result.length > 0 ? result : [text];
+    }
+
+    _isSentenceEnd(text, dotStart, dotEnd) {
+      if (dotStart <= 0) return false;
+      const charBefore = text[dotStart - 1];
+      // Not a sentence end if preceded/followed by a digit (e.g., $44.6)
+      if (/\d/.test(charBefore) && dotEnd < text.length && /\d/.test(text[dotEnd])) return false;
+      // Not a sentence end for abbreviations (single uppercase letter before dot: U.S.A.)
+      if (/[A-Z]/.test(charBefore) && dotEnd < text.length && /[A-Z]/.test(text[dotEnd])) return false;
+      // Must be followed by whitespace or end-of-string to be a real boundary
+      if (dotEnd >= text.length) return true;
+      if (/\s/.test(text[dotEnd])) return true;
+      return false;
+    }
+
+    _splitClauses(text) {
+      return text.split(/(?<=[,;:—])\s+/).filter(c => c.trim());
+    }
+  }
+
+  class CaptionScheduler {
+    constructor() { this._timers = []; }
+    cancel() { for (const t of this._timers) clearTimeout(t); this._timers = []; }
+  }
+
+  class CaptionRateEstimator {
+    constructor() {
+      this._charsPerSec = 11;
+      this._samples = 0;
+    }
+
+    get charsPerSec() { return this._charsPerSec; }
+
+    estimateDuration(charCount) {
+      return (charCount / this._charsPerSec) * 1000;
+    }
+
+    calibrate(charCount, durationMs) {
+      if (durationMs <= 0 || charCount <= 0) return;
+      const observed = charCount / (durationMs / 1000);
+      if (observed < 1 || observed > 50) return;
+      this._samples++;
+      const alpha = this._samples <= 2 ? 0.5 : 0.3;
+      this._charsPerSec = (1 - alpha) * this._charsPerSec + alpha * observed;
+    }
+
+    reset() {
+      this._charsPerSec = 11;
+      this._samples = 0;
+    }
+  }
+
+  class CaptionRenderer {
+    constructor(config) {
+      this._config = config;
+      this._root = null;
+      this._track = null;
+      this._segment = null;
+      this._status = null;
+      this._toggle = null;
+      this._keyHandler = null;
+      this._holdTimer = null;
+      this._mutedObserver = null;
+      this._videoElement = null;
+    }
+
+    attach(parent) {
+      this._injectCSS();
+      this._applyVars(parent);
+
+      this._root = document.createElement('div');
+      this._root.className = 'kav-captions';
+      this._root.setAttribute('role', 'region');
+      this._root.setAttribute('aria-label', 'Closed captions');
+      this._root.setAttribute('aria-live', 'off');
+      this._root.setAttribute('aria-atomic', 'true');
+
+      this._track = document.createElement('div');
+      this._track.className = 'kav-captions__track';
+      this._track.setAttribute('aria-hidden', 'true');
+
+      this._segment = document.createElement('span');
+      this._segment.className = 'kav-captions__segment';
+      this._track.appendChild(this._segment);
+
+      // Screen-reader-only live region for toggle state announcements
+      this._status = document.createElement('span');
+      this._status.className = 'kav-captions__status';
+      this._status.setAttribute('role', 'status');
+      this._status.setAttribute('aria-live', 'polite');
+
+      this._toggle = document.createElement('button');
+      this._toggle.className = 'kav-captions__toggle';
+      this._toggle.type = 'button';
+      this._toggle.setAttribute('role', 'switch');
+      this._toggle.setAttribute('aria-checked', 'true');
+      this._toggle.setAttribute('aria-label', 'Closed captions');
+      this._toggle.title = 'Toggle closed captions (C)';
+      this._toggle.innerHTML = CC_ICON_SVG;
+      this._toggle.addEventListener('click', () => this._onToggleClick());
+
+      this._root.appendChild(this._track);
+      this._root.appendChild(this._status);
+      this._root.appendChild(this._toggle);
+      parent.appendChild(this._root);
+
+      this._keyHandler = (e) => {
+        if (e.key === 'c' || e.key === 'C') {
+          if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+          this._onToggleClick();
+        }
+        if (e.key === 'Escape' && this._track.classList.contains('kav-captions__track--visible')) {
+          this.hideTrack();
+        }
+      };
+      document.addEventListener('keydown', this._keyHandler);
+    }
+
+    showSegment(text) {
+      if (!this._segment) return;
+      if (this._holdTimer) { clearTimeout(this._holdTimer); this._holdTimer = null; }
+      this._segment.textContent = text;
+      this._track.classList.remove('kav-captions__track--fading');
+      this._track.classList.add('kav-captions__track--visible');
+    }
+
+    hideTrack() {
+      if (!this._track) return;
+      this._track.classList.add('kav-captions__track--fading');
+      this._track.classList.remove('kav-captions__track--visible');
+    }
+
+    hideImmediate() {
+      if (this._holdTimer) { clearTimeout(this._holdTimer); this._holdTimer = null; }
+      this.hideTrack();
+    }
+
+    holdThenHide(ms) {
+      if (this._holdTimer) clearTimeout(this._holdTimer);
+      this._holdTimer = setTimeout(() => {
+        this._holdTimer = null;
+        this.hideTrack();
+      }, ms);
+    }
+
+    setEnabled(enabled) {
+      if (!this._toggle) return;
+      this._toggle.setAttribute('aria-checked', String(enabled));
+      if (!enabled) this.hideImmediate();
+    }
+
+    observeMuted(videoElement) {
+      this._videoElement = videoElement;
+      if (!videoElement || !this._root) return;
+      this._checkMuted();
+      if (typeof MutationObserver !== 'undefined') {
+        this._mutedObserver = new MutationObserver(() => this._checkMuted());
+        this._mutedObserver.observe(videoElement, { attributes: true, attributeFilter: ['muted'] });
+      }
+      videoElement.addEventListener('volumechange', () => this._checkMuted());
+    }
+
+    _checkMuted() {
+      if (!this._root || !this._videoElement) return;
+      const muted = this._videoElement.muted || this._videoElement.volume === 0;
+      this._root.setAttribute('aria-live', muted ? 'polite' : 'off');
+      this._track.setAttribute('aria-hidden', muted ? 'false' : 'true');
+    }
+
+    _onToggleClick() {
+      if (!this._toggle) return;
+      const current = this._toggle.getAttribute('aria-checked') === 'true';
+      const next = !current;
+      this._toggle.setAttribute('aria-checked', String(next));
+      if (!next) this.hideImmediate();
+      if (this._status) this._status.textContent = next ? 'Captions on' : 'Captions off';
+      try { localStorage.setItem('kav-captions-enabled', String(next)); } catch (e) { /* ignore */ }
+      return next;
+    }
+
+    isToggledOn() {
+      if (!this._toggle) return true;
+      return this._toggle.getAttribute('aria-checked') === 'true';
+    }
+
+    _applyVars(parent) {
+      const c = this._config;
+      if (c.fontSize) parent.style.setProperty('--kav-cc-size', typeof c.fontSize === 'number' ? c.fontSize + 'px' : c.fontSize);
+      if (c.fontFamily) parent.style.setProperty('--kav-cc-font', c.fontFamily);
+      if (c.textColor) parent.style.setProperty('--kav-cc-text', c.textColor);
+      if (c.backgroundColor) parent.style.setProperty('--kav-cc-bg', c.backgroundColor);
+      if (c.fadeInMs) parent.style.setProperty('--kav-cc-fade-in', c.fadeInMs + 'ms');
+      if (c.fadeOutMs) parent.style.setProperty('--kav-cc-fade-out', c.fadeOutMs + 'ms');
+      if (c.maxLines) parent.style.setProperty('--kav-cc-lines', String(c.maxLines));
+    }
+
+    _injectCSS() {
+      if (document.getElementById('kav-captions-styles')) return;
+      const style = document.createElement('style');
+      style.id = 'kav-captions-styles';
+      style.textContent = CAPTION_CSS;
+      document.head.appendChild(style);
+    }
+
+    detach() {
+      if (this._keyHandler) { document.removeEventListener('keydown', this._keyHandler); this._keyHandler = null; }
+      if (this._holdTimer) { clearTimeout(this._holdTimer); this._holdTimer = null; }
+      if (this._mutedObserver) { this._mutedObserver.disconnect(); this._mutedObserver = null; }
+      if (this._root && this._root.parentNode) { this._root.parentNode.removeChild(this._root); }
+      this._root = null;
+      this._track = null;
+      this._segment = null;
+      this._toggle = null;
+      this._status = null;
+    }
+  }
+
+  class CaptionManager {
+    /**
+     * Timing design:
+     *
+     *   onChunk()         — Buffers text. Emits caption-start on first chunk.
+     *   onSpeakingStart() — Segments the full buffer, shows segment[0], starts tick.
+     *   _onTick() (200ms) — Checks if current segment's display time is up.
+     *                        Display time = segment.length / rate (chars/sec).
+     *                        If time is up, advance to next segment.
+     *   onChunk() while speaking — Appends to buffer, re-segments. Tick picks
+     *                        up new trailing segments naturally.
+     *   onSpeakingEnd()   — Flushes any unseen segments, calibrates rate.
+     *
+     * Key invariant: each segment's display duration is computed from its own
+     * character count at show-time. No cumulative offsets, no total-duration
+     * estimation, no reference to buffer length. Simple and drift-free.
+     */
+    constructor(emitter, config, logger) {
+      this._emitter = emitter;
+      this._log = logger;
+
+      const c = config || {};
+      this._enabled = c.enabled || false;
+      this._render = c.render !== false;
+      this._maxCharsPerLine = c.maxCharsPerLine || 47;
+      this._maxLines = c.maxLines || 2;
+      this._holdAfterEndMs = c.holdAfterEndMs || 2000;
+
+      this._segmenter = new CaptionSegmenter(this._maxCharsPerLine, this._maxLines);
+      this._scheduler = new CaptionScheduler();
+      this._rate = new CaptionRateEstimator();
+      this._renderer = this._render ? new CaptionRenderer(c) : null;
+
+      this._responseId = null;
+      this._textBuffer = '';
+      this._segments = [];
+      this._displayedIndex = -1;
+      this._displayedAt = 0;
+      this._displayedLen = 0;
+      this._speakingStartTime = 0;
+      this._speaking = false;
+      this._active = false;
+      this._tick = null;
+
+      if (c.enabled === undefined && typeof localStorage !== 'undefined') {
+        try {
+          const stored = localStorage.getItem('kav-captions-enabled');
+          if (stored === 'false') this._enabled = false;
+          else if (stored === 'true') this._enabled = true;
+        } catch (e) { /* ignore */ }
+      }
+    }
+
+    attach(parent, videoElement) {
+      if (this._renderer && parent) {
+        this._renderer.attach(parent);
+        this._renderer.setEnabled(this._enabled);
+        if (videoElement) this._renderer.observeMuted(videoElement);
+      }
+    }
+
+    setEnabled(enabled) {
+      this._enabled = enabled;
+      if (this._renderer) this._renderer.setEnabled(enabled);
+      try { localStorage.setItem('kav-captions-enabled', String(enabled)); } catch (e) { /* ignore */ }
+    }
+
+    isEnabled() { return this._enabled; }
+
+    setStyle(style) {
+      if (!this._renderer || !this._renderer._root) return;
+      const parent = this._renderer._root.parentNode;
+      if (!parent) return;
+      if (style.fontSize) parent.style.setProperty('--kav-cc-size', typeof style.fontSize === 'number' ? style.fontSize + 'px' : style.fontSize);
+      if (style.fontFamily) parent.style.setProperty('--kav-cc-font', style.fontFamily);
+      if (style.textColor) parent.style.setProperty('--kav-cc-text', style.textColor);
+      if (style.backgroundColor) parent.style.setProperty('--kav-cc-bg', style.backgroundColor);
+    }
+
+    onChunk(text, speechId) {
+      if (!this._enabled) return;
+      if (!text || !text.trim()) return;
+
+      const rid = speechId || this._responseId || this._generateId();
+      if (rid !== this._responseId) {
+        if (this._active) this._interrupt();
+        this._responseId = rid;
+        this._textBuffer = '';
+        this._segments = [];
+        this._displayedIndex = -1;
+        this._displayedAt = 0;
+        this._displayedLen = 0;
+        this._speaking = false;
+        this._active = true;
+        this._emitter.emit(Events.CAPTION_START, { responseId: this._responseId });
+      }
+
+      this._textBuffer += text;
+
+      // Re-segment on every chunk so the tick has up-to-date segments
+      this._segments = this._segmenter.segment(this._textBuffer);
+    }
+
+    onSpeakingStart() {
+      if (!this._enabled || !this._active) return;
+      this._speakingStartTime = Date.now();
+      this._speaking = true;
+
+      // Segment current buffer and show first segment if it's complete
+      this._segments = this._segmenter.segment(this._textBuffer);
+      if (this._segments.length > 0 && this._displayedIndex < 0) {
+        // Only show if: multiple segments exist (first ends at natural boundary)
+        // OR the buffer ends with sentence punctuation (complete thought)
+        if (this._segments.length > 1 || /[.!?]["'’)]*\s*$/.test(this._textBuffer)) {
+          this._show(0);
+        }
+      }
+
+      this._startTick();
+    }
+
+    onSpeakingEnd(fullText, speechId) {
+      if (!this._enabled) {
+        this._reset();
+        return;
+      }
+
+      this._speaking = false;
+      this._stopTick();
+
+      // Fallback: no chunks arrived at all
+      if (!this._active && fullText && fullText.trim()) {
+        this._responseId = speechId || this._generateId();
+        this._textBuffer = fullText;
+        this._active = true;
+        this._emitter.emit(Events.CAPTION_START, { responseId: this._responseId });
+        this._segments = this._segmenter.segment(fullText);
+        for (let i = 0; i < this._segments.length; i++) {
+          this._show(i);
+        }
+      } else if (this._active) {
+        // Use authoritative full text, flush any remaining segments
+        if (fullText && fullText.trim()) this._textBuffer = fullText;
+        this._segments = this._segmenter.segment(this._textBuffer);
+        for (let i = this._displayedIndex + 1; i < this._segments.length; i++) {
+          this._show(i);
+        }
+      }
+
+      // Calibrate rate from observed speaking duration
+      if (this._speakingStartTime > 0 && this._textBuffer) {
+        const duration = Date.now() - this._speakingStartTime;
+        this._rate.calibrate(this._textBuffer.length, duration);
+      }
+
+      if (this._active) {
+        this._emitter.emit(Events.CAPTION_END, { responseId: this._responseId });
+        if (this._renderer && this._renderer.isToggledOn()) {
+          this._renderer.holdThenHide(this._holdAfterEndMs);
+        }
+      }
+
+      this._reset();
+    }
+
+    interrupt() { this._interrupt(); }
+
+    _interrupt() {
+      if (!this._active) return;
+      this._scheduler.cancel();
+      this._stopTick();
+      this._emitter.emit(Events.CAPTION_INTERRUPTED, {
+        responseId: this._responseId,
+        lastSegmentIndex: Math.max(0, this._displayedIndex)
+      });
+      if (this._renderer) this._renderer.hideImmediate();
+      this._reset();
+    }
+
+    // ── Tick ──────────────────────────────────────────────────────────────
+
+    _startTick() {
+      if (this._tick) return;
+      this._tick = setInterval(() => this._onTick(), 200);
+    }
+
+    _stopTick() {
+      if (this._tick) { clearInterval(this._tick); this._tick = null; }
+    }
+
+    _onTick() {
+      // Nothing shown yet — wait for a complete first segment
+      if (this._displayedIndex < 0) {
+        if (this._segments.length > 1 || /[.!?]["'')]*\s*$/.test(this._textBuffer)) {
+          this._show(0);
+        }
+        return;
+      }
+
+      const nextIndex = this._displayedIndex + 1;
+      if (nextIndex >= this._segments.length) return;
+
+      // Has the current segment been visible long enough?
+      const elapsed = Date.now() - this._displayedAt;
+      const needed = (this._displayedLen / this._rate.charsPerSec) * 1000;
+      if (elapsed >= needed) {
+        this._show(nextIndex);
+      }
+    }
+
+    // ── Display ───────────────────────────────────────────────────────────
+
+    _show(index) {
+      if (index <= this._displayedIndex) return;
+      const text = this._segments[index];
+      if (!text) return;
+
+      this._displayedIndex = index;
+      this._displayedAt = Date.now();
+      this._displayedLen = text.length;
+
+      this._emitter.emit(Events.CAPTION_SEGMENT, {
+        text,
+        index,
+        total: this._segments.length,
+        isFinal: index === this._segments.length - 1,
+        responseId: this._responseId
+      });
+      if (this._renderer && this._renderer.isToggledOn()) {
+        this._renderer.showSegment(text);
+      }
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────
+
+    _reset() {
+      this._active = false;
+      this._textBuffer = '';
+      this._segments = [];
+      this._displayedIndex = -1;
+      this._displayedAt = 0;
+      this._displayedLen = 0;
+      this._speakingStartTime = 0;
+      this._speaking = false;
+      this._stopTick();
+    }
+
+    _generateId() {
+      return 'cc-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    }
+
+    destroy() {
+      this._scheduler.cancel();
+      this._stopTick();
+      if (this._renderer) this._renderer.detach();
+      this._reset();
     }
   }
 
@@ -1995,6 +2574,20 @@
           pauseTypes: config.genui?.pauseTypes !== undefined
             ? config.genui.pauseTypes
             : ['showVisualVideo']
+        }),
+        captions: Object.freeze({
+          enabled: config.captions?.enabled !== undefined ? config.captions.enabled : undefined,
+          maxCharsPerLine: config.captions?.maxCharsPerLine || 47,
+          maxLines: config.captions?.maxLines || 2,
+          render: config.captions?.render !== false,
+          fontSize: config.captions?.fontSize || 18,
+          fontFamily: config.captions?.fontFamily || 'system-ui, -apple-system, sans-serif',
+          textColor: config.captions?.textColor || '#FFFFFF',
+          backgroundColor: config.captions?.backgroundColor || 'rgba(0,0,0,0.8)',
+          fadeInMs: config.captions?.fadeInMs || 120,
+          fadeOutMs: config.captions?.fadeOutMs || 200,
+          holdAfterEndMs: config.captions?.holdAfterEndMs || 2000,
+          container: config.captions?.container || null
         })
       });
 
@@ -2014,6 +2607,7 @@
       this._asr = new ASRConnection(this._config, this._log);
       this._audioFallback = new AudioFallback(this._config, this._log);
       this._genui = new GenUIManager(this._emitter, this._config.genui, this._log);
+      this._captions = new CaptionManager(this._emitter, this._config.captions, this._log);
 
       this._serverInfo = new ServerInfo();
       this._socket = null;
@@ -2089,6 +2683,7 @@
       this._reconnect.cancel();
       this._dpp.cancelDebounce();
       this._genui.destroy();
+      this._captions.destroy();
       this._cleanupConnection();
       this._cleanupMedia();
       this._removeVideoElement();
@@ -2298,6 +2893,14 @@
     isGenUIEnabled() { return this._genui.isEnabled(); }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // CAPTIONS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    setCaptionsEnabled(enabled) { this._captions.setEnabled(enabled); }
+    isCaptionsEnabled() { return this._captions.isEnabled(); }
+    setCaptionStyle(style) { this._captions.setStyle(style); }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // INTERNAL: SOCKET INITIALIZATION
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -2419,12 +3022,14 @@
             _beforeBuffer += data.text;
             this._commands.check(_beforeBuffer, 'before');
             this._emitter.emit(Events.AVATAR_TEXT_READY, { text: data.text, fullText: _beforeBuffer });
+            this._captions.onChunk(data.text, data.speechId);
           }
         });
 
         this._socket.on('stvStartedTalking', () => {
           this._avatarSpeaking = true;
           this._emitter.emit(Events.AVATAR_SPEAKING_START);
+          this._captions.onSpeakingStart();
         });
 
         this._socket.on('stvFinishedTalking', (data) => {
@@ -2438,6 +3043,9 @@
             this._commands.check(text, 'after');
             this._emitter.emit(Events.AVATAR_SPEECH, { text });
             this._emitter.emit(Events.AGENT_TALKED, { agentContent: text });
+            this._captions.onSpeakingEnd(text, data.speechId);
+          } else {
+            this._captions.onSpeakingEnd('', null);
           }
         });
 
@@ -2445,6 +3053,7 @@
         this._socket.on('userStartedTalking', () => {
           this._userSpeaking = true;
           this._emitter.emit(Events.USER_SPEAKING_START);
+          this._captions.interrupt();
         });
 
         // User speech (via server ASR) — interim/partial only
@@ -2731,6 +3340,13 @@
           : this._config.genui.container)
         : container;
       this._genui.attach(genuiTarget);
+
+      const captionTarget = this._config.captions.container
+        ? (typeof this._config.captions.container === 'string'
+          ? document.querySelector(this._config.captions.container)
+          : this._config.captions.container)
+        : container;
+      this._captions.attach(captionTarget, this._videoElement);
     }
 
     _createVideoElement(container) {
@@ -2771,6 +3387,7 @@
       this._sessionId = null;
       this._avatarSpeaking = false;
       this._userSpeaking = false;
+      this._captions.interrupt();
     }
 
     _cleanupConnection() {
@@ -2792,7 +3409,7 @@
 
   // Expose internals for advanced use and testing
   KalturaAvatarSDK.AvatarError = AvatarError;
-  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader };
+  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader, CaptionManager, CaptionSegmenter, CaptionScheduler, CaptionRateEstimator, CaptionRenderer };
 
   return KalturaAvatarSDK;
 }));

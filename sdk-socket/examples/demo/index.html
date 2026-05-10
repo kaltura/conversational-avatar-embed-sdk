@@ -96,6 +96,7 @@
     <input type="text" id="cfg-client-id" value="115767973963657880005" placeholder="Client ID">
     <label>Flow ID:</label>
     <input type="text" id="cfg-flow-id" value="agent-1" placeholder="Flow ID">
+    <label><input type="checkbox" id="cfg-captions" checked> Captions</label>
     <button class="btn-connect" id="btn-connect" onclick="doConnect()">Connect</button>
     <button class="btn-disconnect" id="btn-disconnect" onclick="doDisconnect()" disabled>Disconnect</button>
 </div>
@@ -170,12 +171,15 @@ function doConnect() {
 
     if (sdk) sdk.destroy();
 
+    const captionsEnabled = document.getElementById('cfg-captions').checked;
+
     sdk = new KalturaAvatarSDK({
         clientId,
         flowId,
         container: '#avatar-container',
         debug: true,
-        media: { ariaLabel: 'Demo Avatar' }
+        media: { ariaLabel: 'Demo Avatar' },
+        captions: { enabled: captionsEnabled }
     });
 
     // Register demo commands

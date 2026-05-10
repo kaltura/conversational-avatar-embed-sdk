@@ -691,6 +691,131 @@ sdk.getMicStream();      // The MediaStream from getUserMedia
 
 ---
 
+## Closed Captions
+
+The SDK provides built-in closed captions that synchronize with avatar speech. Captions are WCAG 2.1 AA compliant with full ARIA support, keyboard navigation, and assistive technology announcements.
+
+### Enable Captions
+
+```javascript
+const sdk = new KalturaAvatarSDK({
+  clientId, flowId, container: '#avatar',
+  captions: {
+    enabled: true,         // emit caption events + render overlay
+    maxCharsPerLine: 47,   // WCAG-friendly line width
+    maxLines: 2            // max lines per segment
+  }
+});
+```
+
+If `enabled` is omitted, the SDK checks localStorage for the user's previous preference (set via the CC toggle button). This allows users to enable captions once and have them persist across sessions.
+
+### Runtime Control
+
+```javascript
+sdk.setCaptionsEnabled(true);   // enable
+sdk.setCaptionsEnabled(false);  // disable
+sdk.isCaptionsEnabled();        // check state
+
+// Override styles at runtime
+sdk.setCaptionStyle({
+  fontSize: 20,
+  backgroundColor: 'rgba(0,0,0,0.9)'
+});
+```
+
+### Caption Events
+
+| Event | Payload | When |
+|-------|---------|------|
+| `caption-start` | `{ responseId }` | First text arrives for a new response |
+| `caption-segment` | `{ text, index, total, isFinal, responseId }` | Each displayable caption segment |
+| `caption-end` | `{ responseId }` | All segments emitted, speech finished |
+| `caption-interrupted` | `{ responseId, lastSegmentIndex }` | User interrupted avatar speech |
+
+### Timing
+
+Segments are displayed at a default rate of 11 characters/second. After the first utterance, the SDK calibrates the rate from actual observed speaking duration using an exponential moving average. This self-tunes within 2-3 utterances to match the avatar's actual speaking pace.
+
+### Custom Rendering
+
+Set `render: false` to disable the built-in overlay and render captions yourself:
+
+```javascript
+const sdk = new KalturaAvatarSDK({
+  clientId, flowId, container: '#avatar',
+  captions: { enabled: true, render: false }
+});
+
+sdk.on('caption-segment', ({ text, index, total, isFinal }) => {
+  myCustomCaptionElement.textContent = text;
+});
+
+sdk.on('caption-end', () => {
+  setTimeout(() => { myCustomCaptionElement.textContent = ''; }, 2000);
+});
+
+sdk.on('caption-interrupted', () => {
+  myCustomCaptionElement.textContent = '';
+});
+```
+
+### Built-in Renderer
+
+When `render: true` (default), the SDK renders an accessible caption overlay with:
+- White text on 80% opacity black background (17:1 contrast ratio, exceeds 4.5:1 AA)
+- Fade-in/out transitions (respects `prefers-reduced-motion`)
+- CC toggle button (44x44px touch target, `role="switch"`, keyboard accessible)
+- Screen-reader status announcements on toggle ("Captions on" / "Captions off")
+- `aria-live="polite"` when video is muted (screen readers announce caption text)
+- `aria-hidden="true"` when audio is audible (no double-announcement)
+- High contrast mode support (`forced-colors: active`)
+- User preference persisted in localStorage
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `C` | Toggle captions on/off (ignored when typing in input fields) |
+| `Escape` | Hide captions temporarily |
+| `Tab` | Navigate to CC toggle button |
+| `Enter` / `Space` | Activate CC toggle button |
+
+### Full Configuration
+
+```javascript
+captions: {
+  enabled: undefined,          // undefined = check localStorage; true/false = explicit
+  maxCharsPerLine: 47,         // WCAG-friendly line width
+  maxLines: 2,                 // lines per segment
+  render: true,                // show built-in overlay (false = events only)
+  fontSize: 18,                // px, WCAG AA minimum
+  fontFamily: 'system-ui, -apple-system, sans-serif',
+  textColor: '#FFFFFF',
+  backgroundColor: 'rgba(0,0,0,0.8)',
+  fadeInMs: 120,               // segment appear transition
+  fadeOutMs: 200,              // segment disappear transition
+  holdAfterEndMs: 2000,        // hold last segment after speech ends
+  container: null              // custom container element/selector (default: video container)
+}
+```
+
+### CSS Custom Properties
+
+The built-in renderer uses CSS custom properties for theming. Override them on the container element for full control:
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `--kav-cc-bg` | `rgba(0,0,0,0.8)` | Caption background |
+| `--kav-cc-text` | `#FFFFFF` | Caption text color |
+| `--kav-cc-font` | `system-ui, -apple-system, sans-serif` | Font family |
+| `--kav-cc-size` | `18px` | Font size |
+| `--kav-cc-fade-in` | `120ms` | Fade-in duration |
+| `--kav-cc-fade-out` | `200ms` | Fade-out duration |
+| `--kav-cc-lines` | `2` | Max lines (affects min-height) |
+
+---
+
 ## Conversation Memory
 
 The avatar automatically remembers prior conversations with the same user. This is entirely server-side — no client API needed.

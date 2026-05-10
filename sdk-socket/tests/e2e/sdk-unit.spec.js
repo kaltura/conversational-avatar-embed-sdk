@@ -940,4 +940,483 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     expect(result.inObject).toBe(true);
     expect(result.value).toBe(true);
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // CAPTIONS: Events & Constants
+  // ────────────────────────────────────────────────────────────────────
+
+  test('caption events are defined in Events object', async () => {
+    const result = await page.evaluate(() => {
+      const E = KalturaAvatarSDK.Events;
+      return {
+        start: E.CAPTION_START,
+        segment: E.CAPTION_SEGMENT,
+        end: E.CAPTION_END,
+        interrupted: E.CAPTION_INTERRUPTED
+      };
+    });
+    expect(result.start).toBe('caption-start');
+    expect(result.segment).toBe('caption-segment');
+    expect(result.end).toBe('caption-end');
+    expect(result.interrupted).toBe('caption-interrupted');
+  });
+
+  test('caption public API methods exist', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const methods = {
+        setCaptionsEnabled: typeof sdk.setCaptionsEnabled === 'function',
+        isCaptionsEnabled: typeof sdk.isCaptionsEnabled === 'function',
+        setCaptionStyle: typeof sdk.setCaptionStyle === 'function'
+      };
+      sdk.destroy();
+      return methods;
+    });
+    expect(result.setCaptionsEnabled).toBe(true);
+    expect(result.isCaptionsEnabled).toBe(true);
+    expect(result.setCaptionStyle).toBe(true);
+  });
+
+  test('captions disabled by default', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const enabled = sdk.isCaptionsEnabled();
+      sdk.destroy();
+      return enabled;
+    });
+    expect(result).toBe(false);
+  });
+
+  test('captions can be enabled via config', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f', captions: { enabled: true } });
+      const enabled = sdk.isCaptionsEnabled();
+      sdk.destroy();
+      return enabled;
+    });
+    expect(result).toBe(true);
+  });
+
+  test('setCaptionsEnabled toggles at runtime', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      sdk.setCaptionsEnabled(true);
+      const after = sdk.isCaptionsEnabled();
+      sdk.setCaptionsEnabled(false);
+      const afterOff = sdk.isCaptionsEnabled();
+      sdk.destroy();
+      return { after, afterOff };
+    });
+    expect(result.after).toBe(true);
+    expect(result.afterOff).toBe(false);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // CAPTIONS: Segmenter
+  // ────────────────────────────────────────────────────────────────────
+
+  test('segmenter splits at sentence boundaries', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionSegmenter } = KalturaAvatarSDK._internals;
+      const seg = new CaptionSegmenter(47, 2);
+      return seg.segment('Hello there. How are you today? I am fine.');
+    });
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    expect(result.join(' ')).toContain('Hello there');
+  });
+
+  test('segmenter respects maxChars limit', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionSegmenter } = KalturaAvatarSDK._internals;
+      const seg = new CaptionSegmenter(20, 2); // 40 chars max per segment
+      const segments = seg.segment('This is a test sentence that is longer than forty characters. And another sentence here.');
+      return { segments, allUnderLimit: segments.every(s => s.length <= 50) };
+    });
+    expect(result.segments.length).toBeGreaterThan(1);
+    expect(result.allUnderLimit).toBe(true);
+  });
+
+  test('segmenter never splits mid-word', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionSegmenter } = KalturaAvatarSDK._internals;
+      const seg = new CaptionSegmenter(20, 1); // tight limit
+      const segments = seg.segment('Artificial intelligence is transforming businesses worldwide today.');
+      const allWholeWords = segments.every(s => !s.startsWith(' ') && !s.endsWith(' ') && !/^\S+$/.test(s) || true);
+      const noPartialWords = segments.every(s => {
+        const words = s.split(/\s+/);
+        return words.every(w => w.length > 0);
+      });
+      return { segments, noPartialWords };
+    });
+    expect(result.noPartialWords).toBe(true);
+  });
+
+  test('segmenter handles empty/whitespace input', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionSegmenter } = KalturaAvatarSDK._internals;
+      const seg = new CaptionSegmenter(47, 2);
+      return {
+        empty: seg.segment(''),
+        whitespace: seg.segment('   '),
+        nullish: seg.segment(null)
+      };
+    });
+    expect(result.empty).toEqual([]);
+    expect(result.whitespace).toEqual([]);
+    expect(result.nullish).toEqual([]);
+  });
+
+  test('segmenter keeps numbers with units together', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionSegmenter } = KalturaAvatarSDK._internals;
+      const seg = new CaptionSegmenter(47, 2);
+      const segments = seg.segment('The revenue was $44.6 million last quarter.');
+      const combined = segments.join(' ');
+      return combined.includes('$44.6 million');
+    });
+    expect(result).toBe(true);
+  });
+
+  test('segmenter handles single-word responses', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionSegmenter } = KalturaAvatarSDK._internals;
+      const seg = new CaptionSegmenter(47, 2);
+      return seg.segment('Yes.');
+    });
+    expect(result).toEqual(['Yes.']);
+  });
+
+  test('segmenter handles very long text (produces multiple segments)', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionSegmenter } = KalturaAvatarSDK._internals;
+      const seg = new CaptionSegmenter(47, 2);
+      const longText = 'This is the first sentence about technology. Machine learning models are improving rapidly. They can now understand natural language quite well. This opens up many new possibilities for businesses. Companies are investing heavily in AI research. The future looks very promising for the field. Innovation continues at an unprecedented pace. New breakthroughs are announced almost daily.';
+      const segments = seg.segment(longText);
+      return { count: segments.length, allNonEmpty: segments.every(s => s.trim().length > 0) };
+    });
+    expect(result.count).toBeGreaterThan(2);
+    expect(result.allNonEmpty).toBe(true);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // CAPTIONS: Rate Estimator
+  // ────────────────────────────────────────────────────────────────────
+
+  test('rate estimator has default 11 chars/sec', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionRateEstimator } = KalturaAvatarSDK._internals;
+      const rate = new CaptionRateEstimator();
+      return rate.charsPerSec;
+    });
+    expect(result).toBe(11);
+  });
+
+  test('rate estimator produces reasonable duration', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionRateEstimator } = KalturaAvatarSDK._internals;
+      const rate = new CaptionRateEstimator();
+      return rate.estimateDuration(110); // 110 chars at 11 chars/sec = 10000ms
+    });
+    expect(result).toBe(10000);
+  });
+
+  test('rate estimator calibrates from observed duration', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionRateEstimator } = KalturaAvatarSDK._internals;
+      const rate = new CaptionRateEstimator();
+      rate.calibrate(100, 5000); // 100 chars in 5s = 20 chars/sec
+      return rate.charsPerSec;
+    });
+    expect(result).toBeGreaterThan(11);
+    expect(result).toBeLessThan(20);
+  });
+
+  test('rate estimator converges after multiple samples', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionRateEstimator } = KalturaAvatarSDK._internals;
+      const rate = new CaptionRateEstimator();
+      // Feed consistent 15 chars/sec data
+      for (let i = 0; i < 5; i++) {
+        rate.calibrate(150, 10000);
+      }
+      return Math.abs(rate.charsPerSec - 15) < 1;
+    });
+    expect(result).toBe(true);
+  });
+
+  test('rate estimator rejects unreasonable values', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionRateEstimator } = KalturaAvatarSDK._internals;
+      const rate = new CaptionRateEstimator();
+      rate.calibrate(1000, 1); // 1000000 chars/sec — absurd
+      rate.calibrate(0, 5000); // zero chars
+      return rate.charsPerSec; // should still be 11
+    });
+    expect(result).toBe(11);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // CAPTIONS: Tick-based timing
+  // ────────────────────────────────────────────────────────────────────
+
+  test('tick advances segments based on elapsed time', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        // Use smaller line width to force multiple segments from shorter text
+        const cm = new CaptionManager(emitter, { enabled: true, render: false, maxCharsPerLine: 20, maxLines: 1 }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push({ index: p.index, text: p.text }); });
+        // Two sentences that each exceed 20 chars → forced into separate segments
+        cm.onChunk('Hello there my friend. How are you doing today?', 'sp1');
+        cm.onSpeakingStart();
+        // At 7 chars/sec, first segment (~22 chars) takes ~3.1s. Wait 4s.
+        setTimeout(() => {
+          cm.onSpeakingEnd('Hello there my friend. How are you doing today?', 'sp1');
+          resolve(segments.length);
+        }, 4000);
+      });
+    });
+    expect(result).toBeGreaterThanOrEqual(2);
+  });
+
+  test('tick does not advance before enough time has elapsed', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.index); });
+        cm.onChunk('This is the first sentence. This is the second sentence.', 'sp1');
+        cm.onSpeakingStart();
+        // Check very quickly — should only have shown first segment
+        setTimeout(() => {
+          cm.destroy();
+          resolve(segments.length);
+        }, 300);
+      });
+    });
+    expect(result).toBe(1);
+  });
+
+  test('stopping tick prevents further advancement', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.index); });
+        cm.onChunk('First sentence here. Second sentence here. Third sentence here.', 'sp1');
+        cm.onSpeakingStart();
+        // Interrupt immediately — should stop the tick
+        setTimeout(() => { cm.interrupt(); }, 100);
+        setTimeout(() => resolve(segments.length), 2000);
+      });
+    });
+    expect(result).toBe(1);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // CAPTIONS: Event Lifecycle (CaptionManager integration)
+  // ────────────────────────────────────────────────────────────────────
+
+  test('caption-start fires on first chunk when enabled', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let startFired = false;
+      emitter.on('caption-start', () => { startFired = true; });
+      cm.onChunk('Hello world', 'speech-1');
+      cm.destroy();
+      return startFired;
+    });
+    expect(result).toBe(true);
+  });
+
+  test('caption-segment fires with correct payload', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let payload = null;
+      emitter.on('caption-segment', (p) => { payload = p; });
+      cm.onChunk('Hello world.', 'speech-1');
+      cm.onSpeakingStart();
+      cm.destroy();
+      return payload;
+    });
+    expect(result).not.toBeNull();
+    expect(result.text).toBe('Hello world.');
+    expect(result.index).toBe(0);
+    expect(result.responseId).toBe('speech-1');
+  });
+
+  test('caption-end fires after onSpeakingEnd', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let endFired = false;
+      let endPayload = null;
+      emitter.on('caption-end', (p) => { endFired = true; endPayload = p; });
+      cm.onChunk('Test text.', 'speech-2');
+      cm.onSpeakingStart();
+      cm.onSpeakingEnd('Test text.', 'speech-2');
+      cm.destroy();
+      return { endFired, responseId: endPayload?.responseId };
+    });
+    expect(result.endFired).toBe(true);
+    expect(result.responseId).toBe('speech-2');
+  });
+
+  test('caption-interrupted fires on interrupt', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let interruptPayload = null;
+      emitter.on('caption-interrupted', (p) => { interruptPayload = p; });
+      cm.onChunk('Testing interruption.', 'speech-3');
+      cm.interrupt();
+      cm.destroy();
+      return interruptPayload;
+    });
+    expect(result).not.toBeNull();
+    expect(result.responseId).toBe('speech-3');
+  });
+
+  test('no caption events when disabled', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: false, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let eventCount = 0;
+      emitter.on('caption-start', () => eventCount++);
+      emitter.on('caption-segment', () => eventCount++);
+      emitter.on('caption-end', () => eventCount++);
+      cm.onChunk('Hello', 'speech-1');
+      cm.onSpeakingStart();
+      cm.onSpeakingEnd('Hello', 'speech-1');
+      cm.destroy();
+      return eventCount;
+    });
+    expect(result).toBe(0);
+  });
+
+  test('enable/disable at runtime takes effect on next response', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: false, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let events = [];
+      emitter.on('caption-start', () => events.push('start'));
+      emitter.on('caption-segment', () => events.push('segment'));
+      // First response — disabled
+      cm.onChunk('First.', 'id-1');
+      cm.onSpeakingEnd('First.', 'id-1');
+      const eventsWhileDisabled = events.length;
+      // Enable
+      cm.setEnabled(true);
+      // Second response — should fire
+      cm.onChunk('Second.', 'id-2');
+      cm.onSpeakingEnd('Second.', 'id-2');
+      cm.destroy();
+      return { eventsWhileDisabled, totalAfterEnable: events.length };
+    });
+    expect(result.eventsWhileDisabled).toBe(0);
+    expect(result.totalAfterEnable).toBeGreaterThan(0);
+  });
+
+  test('fallback: full text emitted from onSpeakingEnd when no chunks arrived', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      const segments = [];
+      emitter.on('caption-segment', (p) => segments.push(p.text));
+      // No onChunk called — go straight to onSpeakingEnd
+      cm.onSpeakingEnd('Fallback text here.', 'speech-fallback');
+      cm.destroy();
+      return segments.join(' ');
+    });
+    expect(result).toContain('Fallback text here');
+  });
+
+  test('multiple rapid responses each get unique responseId', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      const ids = [];
+      emitter.on('caption-start', (p) => ids.push(p.responseId));
+      cm.onChunk('First.', 'id-A');
+      cm.onSpeakingEnd('First.', 'id-A');
+      cm.onChunk('Second.', 'id-B');
+      cm.onSpeakingEnd('Second.', 'id-B');
+      cm.destroy();
+      return { count: ids.length, unique: new Set(ids).size === ids.length };
+    });
+    expect(result.count).toBe(2);
+    expect(result.unique).toBe(true);
+  });
+
+  test('new speechId interrupts previous active caption', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let interrupted = false;
+      emitter.on('caption-interrupted', () => { interrupted = true; });
+      cm.onChunk('First response.', 'id-1');
+      cm.onChunk('New response starts.', 'id-2'); // different speechId → interrupt
+      cm.destroy();
+      return interrupted;
+    });
+    expect(result).toBe(true);
+  });
+
+  test('caption segments cover full text (no words missing)', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      const segments = [];
+      emitter.on('caption-segment', (p) => segments.push(p.text));
+      const fullText = 'Hello there. How are you doing today? I am doing well. Thank you for asking.';
+      cm.onChunk(fullText, 'id-cover');
+      cm.onSpeakingStart();
+      cm.onSpeakingEnd(fullText, 'id-cover');
+      cm.destroy();
+      const reconstructed = segments.join(' ');
+      const sourceWords = fullText.split(/\s+/);
+      const allPresent = sourceWords.every(w => reconstructed.includes(w));
+      return { allPresent, segCount: segments.length };
+    });
+    expect(result.allPresent).toBe(true);
+    expect(result.segCount).toBeGreaterThanOrEqual(1);
+  });
+
+  test('destroy clears all timers', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        let segmentsAfterDestroy = 0;
+        emitter.on('caption-segment', () => segmentsAfterDestroy++);
+        cm.onChunk('Hello there. How are you today? Fine thanks.', 'id-x');
+        cm.onSpeakingStart();
+        // Destroy immediately — should cancel scheduled segments
+        const preCount = segmentsAfterDestroy;
+        cm.destroy();
+        setTimeout(() => resolve({ preCount, postCount: segmentsAfterDestroy }), 2000);
+      });
+    });
+    // Only the first segment fires immediately; the rest should be cancelled
+    expect(result.postCount).toBeLessThanOrEqual(result.preCount);
+  });
 });

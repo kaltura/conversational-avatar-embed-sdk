@@ -44,6 +44,11 @@ All classes are defined inside the UMD factory function (not exported individual
 | `RendererRegistry` | Plugin storage + middleware chain for GenUI |
 | `GenUIContainer` | DOM layers (board overlay + visual panel) |
 | `GenUIManager` | Orchestrator: socket events → renderer dispatch |
+| `CaptionSegmenter` | Splits text into display-ready segments respecting word/sentence boundaries |
+| `CaptionScheduler` | Schedules segment emissions at estimated timing intervals |
+| `CaptionRateEstimator` | Calibrates chars/sec from observed speaking durations |
+| `CaptionRenderer` | DOM rendering with WCAG AA accessibility, keyboard, ARIA |
+| `CaptionManager` | Orchestrator: text chunks → segmentation → scheduled emission |
 | `ServerInfo` | Parses and stores server configuration |
 | `KalturaAvatarSDK` | Public API class (facade over all above) |
 
@@ -185,6 +190,71 @@ Socket event (e.g., 'showChart')
 Categories:
 - **Board** (full-screen overlay): `showLatex`, `showChart`, `showHtml`, `showDiagram`, `showCode`, `showIFrame`, `contactEmail`, `contactPhone`
 - **Visual** (bottom-right panel): `showVisualVideo`, `showVisualLink`, `showVisualPhoto`, `showVisualItems`, `showVisualTable`, `showVisualChart`, `showMedia`, `showGeneratedImages`
+
+---
+
+## Caption Pipeline
+
+```
+debug_stvTaskGenerated { text, speechId }   ← text chunks arrive BEFORE audio
+       │
+       ▼
+CaptionManager.onChunk(text, speechId)
+  • Buffer text, track by responseId (= speechId)
+  • If new responseId: emit 'caption-start', interrupt previous
+  • Re-segment buffer (but don't display yet)
+
+stvStartedTalking                           ← audio playback begins
+       │
+       ▼
+CaptionManager.onSpeakingStart()
+  • Record start timestamp (t₀)
+  • Segment buffered text, show segment[0] if complete
+  • Start 200ms tick
+
+tick (every 200ms)                          ← timing loop
+       │
+       ▼
+  • Check: has current segment been visible for (chars / rate) seconds?
+  • If yes: advance to next segment
+  • If no complete segment yet: wait for more chunks
+
+debug_stvTaskGenerated (while speaking)     ← more chunks stream in
+       │
+       ▼
+CaptionManager.onChunk(text, speechId)
+  • Append to buffer, re-segment
+  • Tick will pick up new trailing segments naturally
+
+stvFinishedTalking { agentContent }         ← audio ends
+       │
+       ▼
+CaptionManager.onSpeakingEnd(fullText)
+  • Stop tick
+  • Flush any remaining segments immediately
+  • Calibrate rate: actualDuration / totalChars → chars/sec (EMA α=0.3)
+  • Emit 'caption-end'
+  • Hold last segment visible (default 2s), then fade out
+
+userStartedTalking                          ← user interrupts
+       │
+       ▼
+CaptionManager.interrupt()
+  • Stop tick
+  • Emit 'caption-interrupted'
+  • Immediate fade out
+```
+
+**Key design decisions:**
+- Text arrives BEFORE audio → chunks buffer silently until speaking starts
+- First segment only shown when it ends at a natural boundary (sentence punctuation or segmenter split)
+- No word-level timing from server → tick-based advancement using chars/sec rate
+- Default rate: 11 chars/sec; calibrates from observed speaking duration after each utterance
+- Rate calibration converges after 2-3 utterances via exponential moving average (α=0.3)
+- Each segment's display time is self-contained (its own char count / rate) — no cumulative drift
+- `aria-live="off"` when audio audible (deaf/HoH read visually); switches to `aria-live="polite"` when video muted
+- Toggle state announced to screen readers via `role="status"` live region
+- User toggle preference persisted in localStorage
 
 ---
 

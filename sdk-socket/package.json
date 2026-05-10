@@ -1,6 +1,6 @@
 {
   "name": "@kaltura/avatar-sdk-socket",
-  "version": "2.3.8",
+  "version": "2.4.0",
   "description": "Kaltura Avatar SDK (Socket) — Direct Socket.IO + WebRTC connection to AI Avatars. Full control over video, audio, events, and GenUI rendering.",
   "license": "MIT",
   "main": "dist/kaltura-avatar-sdk.js",
