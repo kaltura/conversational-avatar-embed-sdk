@@ -542,6 +542,29 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     expect(result).toBe('Navigating to slide twenty-seven.');
   });
 
+  test('command matches on accumulated buffer when server sends deltas', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cr = new CommandRegistry(emitter);
+        let firedText = null;
+        // Use debounce to get the final accumulated text (real apps should do this)
+        cr.register('nav', /navigating to slide \w+/i, (m) => { firedText = m.text; }, { timing: 'before', debounce: 50 });
+
+        // Simulate delta accumulation (as the fixed socket handler does)
+        let buffer = '';
+        const chunks = ['Navigating to slide t', 'wenty-two.'];
+        for (const chunk of chunks) {
+          buffer += chunk;
+          cr.check(buffer, 'before');
+        }
+        setTimeout(() => resolve(firedText), 150);
+      });
+    });
+    expect(result).toBe('Navigating to slide twenty-two.');
+  });
+
   // ────────────────────────────────────────────────────────────────────
   // DPP MANAGER
   // ────────────────────────────────────────────────────────────────────

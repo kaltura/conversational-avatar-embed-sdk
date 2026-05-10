@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.4.5
+ * @version 2.4.6
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.4.5';
+  const VERSION = '2.4.6';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -3189,13 +3189,18 @@
 
         this._socket.on('debug_stvTaskGenerated', (data) => {
           if (data?.text) {
-            // Server sends cumulative text (full response so far), not just the new delta.
-            // Extract the delta by comparing with what we already have.
-            let delta = data.text;
-            if (data.text.length > _beforeBuffer.length && data.text.startsWith(_beforeBuffer)) {
+            // Server may send cumulative text (full response so far) OR just the new delta.
+            // Detect which mode and extract the delta accordingly.
+            let delta;
+            if (data.text.startsWith(_beforeBuffer) && data.text.length >= _beforeBuffer.length) {
+              // Cumulative: server sent the full text so far
               delta = data.text.slice(_beforeBuffer.length);
+              _beforeBuffer = data.text;
+            } else {
+              // Delta: server sent only the new fragment
+              delta = data.text;
+              _beforeBuffer += data.text;
             }
-            _beforeBuffer = data.text;
             this._commands.check(_beforeBuffer, 'before');
             this._emitter.emit(Events.AVATAR_TEXT_READY, { text: delta, fullText: _beforeBuffer });
             this._captions.onChunk(delta, data.speechId);
