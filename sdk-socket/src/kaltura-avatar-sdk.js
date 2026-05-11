@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.5.4
+ * @version 2.5.5
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.5.4';
+  const VERSION = '2.5.5';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -2975,7 +2975,7 @@
                 const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK').toLowerCase();
                 this._socket.emit('join', {
                   client: this._config.clientId,
-                  debugMode: false,
+                  debugMode: true,
                   room: this._roomId,
                   userAgent: ua,
                   peer_name: this._config.peerName,
@@ -3268,7 +3268,7 @@
           client: this._config.clientId,
           flowId: this._config.flowId,
           billed_client: '',
-          debugMode: false,
+          debugMode: true,
           ks: '',
           stickyId: this._stickyId,
           level: 'published'
@@ -3326,7 +3326,7 @@
             const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK').toLowerCase();
             this._socket.emit('join', {
               client: this._config.clientId,
-              debugMode: false,
+              debugMode: true,
               room: this._roomId,
               userAgent: ua,
               peer_name: this._config.peerName,
@@ -3365,7 +3365,7 @@
           const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK').toLowerCase();
           this._socket.emit('isValidSession', {
             client: this._config.clientId,
-            debugMode: false,
+            debugMode: true,
             room: this._roomId,
             userAgent: ua,
             referrer: '',
@@ -3376,7 +3376,7 @@
           });
           this._socket.emit('join', {
             client: this._config.clientId,
-            debugMode: false,
+            debugMode: true,
             room: this._roomId,
             userAgent: ua,
             peer_name: this._config.peerName,
@@ -3417,7 +3417,7 @@
           const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK').toLowerCase();
           this._socket.emit('stvNewSession', {
             client: this._config.clientId,
-            debugMode: false,
+            debugMode: true,
             room: this._roomId,
             userAgent: ua,
             peer_name: this._config.peerName,

@@ -413,6 +413,151 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────
+  // COMMAND PIPELINE SIMULATION (full utterance lifecycle)
+  // These tests simulate the exact SDK event pipeline:
+  //   streaming chunks → check(buffer, 'before') per chunk
+  //   stvFinishedTalking → check(fullText, 'after') then resetUtterance()
+  // ────────────────────────────────────────────────────────────────────
+
+  test('pipeline: timing "before" fires during chunks, silent on after phase', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      const fires = [];
+      cr.register('nav', 'next slide', (m) => { fires.push(m.timing); }, { timing: 'before' });
+      // Streaming chunks (before phase)
+      let buffer = '';
+      buffer += 'Go to next '; cr.check(buffer, 'before');
+      buffer += 'slide please.'; cr.check(buffer, 'before');
+      // stvFinishedTalking (after phase then reset)
+      cr.check(buffer, 'after');
+      cr.resetUtterance();
+      return fires;
+    });
+    expect(result).toEqual(['before']);
+  });
+
+  test('pipeline: timing "after" silent during chunks, fires on stvFinishedTalking', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      const fires = [];
+      cr.register('end', 'ending call', (m) => { fires.push(m.timing); }, { timing: 'after' });
+      // Streaming chunks (before phase) — should NOT fire
+      let buffer = '';
+      buffer += 'Thank you! '; cr.check(buffer, 'before');
+      buffer += 'Ending call now.'; cr.check(buffer, 'before');
+      // stvFinishedTalking (after phase) — should fire here
+      cr.check('Thank you! Ending call now.', 'after');
+      cr.resetUtterance();
+      return fires;
+    });
+    expect(result).toEqual(['after']);
+  });
+
+  test('pipeline: timing "both" fires once whichever phase matches first', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      const fires = [];
+      cr.register('end', 'ending call', (m) => { fires.push(m.timing); }, { timing: 'both' });
+      // Pattern matches in streaming (before phase)
+      let buffer = 'Ending call now.';
+      cr.check(buffer, 'before');
+      // stvFinishedTalking — should NOT fire again (deduplication)
+      cr.check(buffer, 'after');
+      cr.resetUtterance();
+      return fires;
+    });
+    expect(result).toEqual(['before']);
+  });
+
+  test('pipeline: timing "both" fires on after if pattern absent during streaming', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      const fires = [];
+      // Pattern only appears in the final agentContent, not streaming chunks
+      cr.register('end', 'ending call', (m) => { fires.push(m.timing); }, { timing: 'both' });
+      // Streaming chunks don't contain the trigger
+      cr.check('Thank you for your time.', 'before');
+      // Final text includes it (server may send fuller text in stvFinishedTalking)
+      cr.check('Thank you for your time. Ending call now.', 'after');
+      cr.resetUtterance();
+      return fires;
+    });
+    expect(result).toEqual(['after']);
+  });
+
+  test('pipeline: two consecutive utterances fire independently', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      const fires = [];
+      cr.register('end', 'ending call', (m) => { fires.push('utterance'); }, { timing: 'before' });
+      // First utterance — no match
+      cr.check('Hello there!', 'before');
+      cr.check('Hello there!', 'after');
+      cr.resetUtterance();
+      // Second utterance — matches
+      cr.check('Ending call now.', 'before');
+      cr.check('Ending call now.', 'after');
+      cr.resetUtterance();
+      return fires;
+    });
+    expect(result).toEqual(['utterance']);
+  });
+
+  test('pipeline: same command fires once per utterance across multiple utterances', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let count = 0;
+      cr.register('score', /score is \d+/, (m) => { count++; }, { timing: 'before' });
+      // Utterance 1
+      let buf = 'Your score is 95.';
+      cr.check(buf, 'before');
+      cr.check(buf, 'after');
+      cr.resetUtterance();
+      // Utterance 2 — same pattern, new text
+      buf = 'Final score is 88.';
+      cr.check(buf, 'before');
+      cr.check(buf, 'after');
+      cr.resetUtterance();
+      return count;
+    });
+    expect(result).toBe(2);
+  });
+
+  test('pipeline: "before" command with growing buffer fires exactly once', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let count = 0;
+      cr.register('nav', 'slide three', (m) => { count++; }, { timing: 'before' });
+      // Simulate 5 streaming chunks building up
+      let buffer = '';
+      const chunks = ['Let me show ', 'you slide ', 'three', ' which covers', ' the topic.'];
+      for (const chunk of chunks) {
+        buffer += chunk;
+        cr.check(buffer, 'before');
+      }
+      // stvFinishedTalking
+      cr.check(buffer, 'after');
+      cr.resetUtterance();
+      return count;
+    });
+    expect(result).toBe(1);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
   // COMMAND BUFFERING (chunked text)
   // ────────────────────────────────────────────────────────────────────
 

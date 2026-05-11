@@ -343,7 +343,7 @@ Every Socket.IO connection sends these query params (visible in the URL):
 | `client` | `config.clientId` | Identifies the Kaltura account |
 | `flowId` | `config.flowId` | Which avatar agent to connect to |
 | `billed_client` | Always `''` | Reserved for future partner billing delegation (not yet implemented) |
-| `debugMode` | Always `false` | Server-side debug mode. Hardcoded off — the SDK does not expose this to users. Server-side speech events (`debug_stvTaskGenerated`, `debug_vad_speech_detected`) arrive regardless of this flag despite their naming. |
+| `debugMode` | Always `true` | Enables server-side streaming text events (`debug_stvTaskGenerated`, `debug_vad_speech_detected`). Despite the `debug_` prefix in event names, this is required for core SDK features: `avatar-text-ready` events, `timing: 'before'` commands, and interim user speech transcription. Not user-configurable. |
 | `ks` | Always `''` | Kaltura Session token. Currently empty (anonymous sessions). Apps needing authenticated analytics use the KAVA plugin's separate KS config, not this connection param. |
 | `stickyId` | `generateId(8) + generateId(8)` (16 chars) | Session affinity token — ensures the load balancer routes all requests for this session to the same conversation-manager pod. Generated fresh per `connect()` call. Without it, polling requests could hit different pods before the WebSocket upgrade completes. |
 | `level` | Always `'published'` | Content level filter (published = production agent, draft = staging) |
