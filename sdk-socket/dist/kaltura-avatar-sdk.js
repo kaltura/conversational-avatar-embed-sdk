@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.5.3
+ * @version 2.5.4
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.5.3';
+  const VERSION = '2.5.4';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -3477,7 +3477,6 @@
 
         this._socket.on('stvFinishedTalking', (data) => {
           _beforeBuffer = '';
-          this._commands.resetUtterance();
           this._avatarSpeaking = false;
           this._emitter.emit(Events.AVATAR_SPEAKING_END);
           if (data?.agentContent) {
@@ -3490,6 +3489,7 @@
           } else {
             this._captions.onSpeakingEnd('', null);
           }
+          this._commands.resetUtterance();
         });
 
         // User started speaking (server-side VAD detection)

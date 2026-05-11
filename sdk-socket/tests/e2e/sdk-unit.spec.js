@@ -394,6 +394,24 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     expect(result.command).toBe('nav');
   });
 
+  test('command timing: "both" fires once even with resetUtterance between phases (pipeline order)', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandRegistry, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cr = new CommandRegistry(emitter);
+      let count = 0;
+      cr.register('end', 'ending call', () => { count++; }, { timing: 'both' });
+      // Simulate real pipeline: before-phase fires during streaming chunks
+      cr.check('ending call now', 'before');
+      // Pipeline calls check(text, 'after') THEN resetUtterance (fixed order)
+      cr.check('ending call now', 'after');
+      // resetUtterance prepares for NEXT utterance, not current one
+      cr.resetUtterance();
+      return count;
+    });
+    expect(result).toBe(1);
+  });
+
   // ────────────────────────────────────────────────────────────────────
   // COMMAND BUFFERING (chunked text)
   // ────────────────────────────────────────────────────────────────────
