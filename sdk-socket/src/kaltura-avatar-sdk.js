@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.5.1
+ * @version 2.5.2
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.5.1';
+  const VERSION = '2.5.2';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -98,6 +98,7 @@
     CONNECTION_LOST: 1003,
     JOIN_FAILED: 1004,
     FLOW_CONFIG_ERROR: 1005,
+    HANDSHAKE_TIMEOUT: 1006,
 
     MIC_PERMISSION_DENIED: 2001,
     MIC_NOT_AVAILABLE: 2002,
@@ -2959,8 +2960,38 @@
 
     _connectWithQueue() {
       return new Promise((resolve, reject) => {
+        this._socketConnected = false;
+
         let timer = setTimeout(() => {
-          if (!this._queue.active) {
+          if (this._queue.active) return;
+
+          if (this._socketConnected) {
+            // Socket transport connected but server never sent onServerConnected/throwToNoAgent.
+            // Treat as implicit capacity issue — activate queue if enabled.
+            const activated = this._queue.active ? true : this._queue.activate(
+              this._socket,
+              () => { if (timer) { clearTimeout(timer); timer = null; } },
+              () => {
+                this._socket.emit('join', {
+                  client: this._config.clientId,
+                  channel: this._roomId,
+                  userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK',
+                  channel_password: null,
+                  peer_name: this._config.peerName,
+                  peer_video: false,
+                  peer_audio: true,
+                  isMobile: false
+                });
+                this._state.transition(State.JOINING);
+              },
+              reject
+            );
+            if (!activated) {
+              reject(new AvatarError(ErrorCode.HANDSHAKE_TIMEOUT,
+                'Server connected but did not respond within ' + this._config.connectionTimeout + 'ms',
+                { recoverable: true }));
+            }
+          } else {
             reject(new AvatarError(ErrorCode.CONNECTION_TIMEOUT,
               'Connection timed out after ' + this._config.connectionTimeout + 'ms',
               { recoverable: true }));
@@ -3249,6 +3280,7 @@
 
         this._socket.on('connect', () => {
           this._log.info('Socket connected', this._socket.id);
+          this._socketConnected = true;
           this._state.transition(State.CONNECTED);
           this._emitter.emit(Events.CONNECTED);
         });
@@ -3762,6 +3794,7 @@
       this._sessionId = null;
       this._avatarSpeaking = false;
       this._userSpeaking = false;
+      this._socketConnected = false;
       this._queue.reset();
       this._captions.interrupt();
     }
