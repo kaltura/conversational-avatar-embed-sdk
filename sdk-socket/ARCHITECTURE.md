@@ -404,6 +404,44 @@ Test structure:
 
 ---
 
+## Plugins
+
+Optional extensions live in `plugins/` — separate from core SDK source and dist.
+
+```
+plugins/
+└── kava-analytics/
+    ├── kaltura-avatar-analytics.js    ← KAVA analytics plugin (UMD)
+    ├── kaltura-avatar-analytics.d.ts  ← TypeScript declarations
+    └── README.md                      ← Plugin docs
+```
+
+### KAVA Analytics Plugin
+
+Reports Immersive Agent events (80001-80005) and standard KAVA events (pageView, buttonClick) to `analytics.kaltura.com`. Attaches to the SDK via public API only:
+
+```javascript
+const kava = new KalturaAvatarAnalytics(sdk, { ks, partnerId });
+// Auto-fires: callStarted on ready, callEnded on disconnect, messageResponse on speech
+```
+
+Internal classes: `SessionTracker`, `TransportLayer`, `EventBuilder`, `PluginEmitter`, `KalturaAvatarAnalytics` (facade).
+
+Transport: HTTP POST via `fetch({keepalive:true})`; `sendBeacon` for page-leave events.
+
+See [`plugins/kava-analytics/README.md`](plugins/kava-analytics/README.md) for full API docs.
+
+### Adding a New Plugin
+
+1. Create `plugins/your-plugin/` directory
+2. Single UMD file (same pattern as core SDK — no build step)
+3. TypeScript declarations in same directory
+4. Test file in `tests/e2e/your-plugin.spec.js`
+5. Add to `test-runner.html` and `package.json` test script
+6. Plugin uses only public SDK API (`.on()`, `.getState()`, `.getClientId()`)
+
+---
+
 ## Release Process
 
 1. Sync all version strings:

@@ -549,6 +549,8 @@ export declare class KalturaAvatarSDK {
 
   // ── State & Info ──
   getState(): AvatarState;
+  getClientId(): string;
+  getFlowId(): string;
   getSessionId(): string | null;
   getRoomId(): string | null;
   getVideoElement(): HTMLVideoElement | null;

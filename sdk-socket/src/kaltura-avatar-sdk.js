@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.4.7
+ * @version 2.5.0
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.4.7';
+  const VERSION = '2.5.0';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -3107,6 +3107,8 @@
     // ─────────────────────────────────────────────────────────────────────────
 
     getState() { return this._state.current; }
+    getClientId() { return this._config.clientId; }
+    getFlowId() { return this._config.flowId; }
     getSessionId() { return this._sessionId; }
     getRoomId() { return this._roomId; }
     getVideoElement() { return this._videoElement; }

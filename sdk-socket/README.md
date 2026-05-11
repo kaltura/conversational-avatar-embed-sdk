@@ -1179,14 +1179,34 @@ Requires: WebRTC, getUserMedia, fetch API
 
 ---
 
+## Plugins
+
+Optional extensions live in `plugins/`:
+
+| Plugin | Description | Size |
+|--------|-------------|------|
+| [KAVA Analytics](plugins/kava-analytics/README.md) | Reports Immersive Agent events + standard KAVA events to Kaltura analytics | ~12KB |
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-socket/plugins/kava-analytics/kaltura-avatar-analytics.js"></script>
+```
+
+```javascript
+const kava = new KalturaAvatarAnalytics(sdk, { ks: 'your-ks', partnerId: 12345 });
+// Auto-reports: callStarted, callEnded, messageResponse
+```
+
+---
+
 ## Running Tests
 
 ```bash
 cd sdk-socket
 npm install
-npm test           # Unit + GenUI + caption tests (206 tests, ~15 seconds)
-npm run test:live  # Live integration tests (connects to real server)
-npm run test:all   # All tests
+npm test                   # Unit + GenUI + analytics tests (243 tests, ~18 seconds)
+npm run test:analytics     # Analytics plugin tests only
+npm run test:live          # Live integration tests (connects to real server)
+npm run test:all           # All tests
 ```
 
 ---

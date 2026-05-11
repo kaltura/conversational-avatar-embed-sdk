@@ -52,7 +52,7 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install chromium --with-deps
 
-      - name: Run unit + GenUI tests (125 tests)
+      - name: Run unit + GenUI + analytics tests
         working-directory: sdk-socket
         run: npm test
 
@@ -92,6 +92,16 @@ jobs:
             echo "Validating: $f"
             node -e "JSON.parse(require('fs').readFileSync('$f', 'utf8'))" || exit 1
           done
+
+      - name: Check Analytics Plugin file size (must be <25KB)
+        run: |
+          MAX_SIZE=25600
+          SIZE=$(wc -c < sdk-socket/plugins/kava-analytics/kaltura-avatar-analytics.js)
+          echo "Analytics Plugin: ${SIZE} bytes"
+          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+            echo "::error::Analytics plugin size ($SIZE bytes) exceeds limit ($MAX_SIZE bytes)"
+            exit 1
+          fi
 
       - name: Check for console.log in production Iframe SDK
         run: |

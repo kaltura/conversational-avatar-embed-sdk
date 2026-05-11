@@ -1,6 +1,6 @@
 {
   "name": "@kaltura/avatar-sdk-socket",
-  "version": "2.4.7",
+  "version": "2.5.0",
   "description": "Kaltura Avatar SDK (Socket) — Direct Socket.IO + WebRTC connection to AI Avatars. Full control over video, audio, events, and GenUI rendering.",
   "license": "MIT",
   "main": "dist/kaltura-avatar-sdk.js",
@@ -25,7 +25,9 @@
     "socket.io-client": "^4.0.0"
   },
   "scripts": {
-    "test": "npx playwright test tests/e2e/sdk-unit.spec.js tests/e2e/genui.spec.js",
+    "test": "npx playwright test tests/e2e/sdk-unit.spec.js tests/e2e/genui.spec.js tests/e2e/analytics.spec.js tests/e2e/analytics-integration.spec.js tests/e2e/demo-smoke.spec.js",
+    "test:analytics": "npx playwright test tests/e2e/analytics.spec.js",
+    "test:analytics:live": "npx playwright test tests/e2e/analytics-live.spec.js",
     "test:live": "npx playwright test tests/e2e/live-flow.spec.js",
     "test:all": "npx playwright test",
     "demo": "python3 -m http.server 8090 --directory ."

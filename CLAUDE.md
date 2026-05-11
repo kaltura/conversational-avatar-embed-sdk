@@ -31,7 +31,8 @@ Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowle
 - Types: `sdk-socket/dist/kaltura-avatar-sdk.d.ts`
 - Architecture: `sdk-socket/ARCHITECTURE.md`
 - Demo: `sdk-socket/examples/demo/index.html`
-- Tests: `sdk-socket/tests/e2e/` (206 tests via Playwright)
+- Tests: `sdk-socket/tests/e2e/` (243 tests via Playwright)
+- Plugins: `sdk-socket/plugins/` (optional extensions — kava-analytics)
 - Peer dependency: Socket.IO client v4
 
 ### Key Socket SDK Patterns
@@ -45,13 +46,14 @@ Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowle
 7. **Captions**: `captions: { enabled: true }` — WCAG 2.1 AA closed captions with built-in renderer, tick-based timing, rate auto-calibration
 8. **Contact**: `sdk.submitContact(type, value)` / `sdk.rejectContact(type)` — must call one or avatar hangs
 9. **Queue**: `queue: { enabled: true, maxWaitMs: 0 }` — automatic retry when server is at capacity, cyclic polling with configurable delays
+10. **Analytics**: `new KalturaAvatarAnalytics(sdk, { ks, partnerId })` — optional KAVA plugin, auto-reports call lifecycle and message events
 
 ### Running Socket SDK Tests
 
 ```bash
 cd sdk-socket
 npm install
-npm test          # 206 unit + GenUI + caption + queue tests (~15s)
+npm test          # 243 unit + GenUI + analytics tests (~18s)
 npm run test:all  # All including live integration
 ```
 
