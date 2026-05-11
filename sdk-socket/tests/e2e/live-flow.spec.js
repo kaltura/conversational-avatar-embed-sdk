@@ -275,6 +275,115 @@ test.describe('KalturaAvatarSDK — Live Integration', () => {
     expect(result.commandFired).toBe(true);
   });
 
+  test('avatar-text-ready fires BEFORE avatar-speaking-start (streaming text)', async ({ page }) => {
+    await page.goto('/tests/e2e/test-runner.html');
+    await page.waitForFunction(() => typeof window.KalturaAvatarSDK !== 'undefined');
+
+    const result = await page.evaluate(async ({ clientId, flowId }) => {
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          sdk.destroy();
+          resolve({ timeline, error: 'Timeout — avatar did not speak within 30s' });
+        }, 30000);
+
+        const sdk = new KalturaAvatarSDK({
+          clientId,
+          flowId,
+          container: '#test-container',
+          debug: true
+        });
+
+        const timeline = [];
+
+        sdk.on('avatar-text-ready', ({ text, fullText }) => {
+          if (timeline.length === 0 || !timeline.some(e => e.event === 'text-ready')) {
+            timeline.push({ event: 'text-ready', text: fullText.substring(0, 50) });
+          }
+        });
+
+        sdk.on('avatar-speaking-start', () => {
+          timeline.push({ event: 'speaking-start' });
+        });
+
+        sdk.on('avatar-speech', ({ text }) => {
+          timeline.push({ event: 'avatar-speech', text: text.substring(0, 50) });
+          clearTimeout(timeout);
+          sdk.destroy();
+          resolve({ timeline });
+        });
+
+        sdk.connect().catch((err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
+      });
+    }, { clientId: CLIENT_ID, flowId: FLOW_ID });
+
+    // avatar-text-ready must exist (proves debug_stvTaskGenerated is arriving)
+    const textReadyIdx = result.timeline.findIndex(e => e.event === 'text-ready');
+    const speakingStartIdx = result.timeline.findIndex(e => e.event === 'speaking-start');
+    const speechIdx = result.timeline.findIndex(e => e.event === 'avatar-speech');
+
+    expect(textReadyIdx).toBeGreaterThanOrEqual(0); // text-ready fired
+    expect(speakingStartIdx).toBeGreaterThanOrEqual(0); // speaking-start fired
+    expect(textReadyIdx).toBeLessThan(speakingStartIdx); // text arrived BEFORE audio
+    expect(speechIdx).toBeGreaterThan(speakingStartIdx); // speech (final) after speaking
+  });
+
+  test('timing "before" command fires before avatar-speech event', async ({ page }) => {
+    await page.goto('/tests/e2e/test-runner.html');
+    await page.waitForFunction(() => typeof window.KalturaAvatarSDK !== 'undefined');
+
+    const result = await page.evaluate(async ({ clientId, flowId }) => {
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          sdk.destroy();
+          resolve({ timeline, error: 'Timeout' });
+        }, 30000);
+
+        const sdk = new KalturaAvatarSDK({
+          clientId,
+          flowId,
+          container: '#test-container',
+          debug: true
+        });
+
+        const timeline = [];
+
+        // Register a broad command that will match the greeting
+        sdk.registerCommand('greet-detect', /./i, (match) => {
+          if (!timeline.some(e => e.event === 'before-command')) {
+            timeline.push({ event: 'before-command', text: match.text.substring(0, 50) });
+          }
+        }, { timing: 'before' });
+
+        sdk.on('avatar-speaking-start', () => {
+          timeline.push({ event: 'speaking-start' });
+        });
+
+        sdk.on('avatar-speech', ({ text }) => {
+          timeline.push({ event: 'avatar-speech' });
+          clearTimeout(timeout);
+          sdk.destroy();
+          resolve({ timeline });
+        });
+
+        sdk.connect().catch((err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
+      });
+    }, { clientId: CLIENT_ID, flowId: FLOW_ID });
+
+    const beforeCmdIdx = result.timeline.findIndex(e => e.event === 'before-command');
+    const speakingStartIdx = result.timeline.findIndex(e => e.event === 'speaking-start');
+    const speechIdx = result.timeline.findIndex(e => e.event === 'avatar-speech');
+
+    expect(beforeCmdIdx).toBeGreaterThanOrEqual(0); // before-command fired
+    expect(beforeCmdIdx).toBeLessThan(speakingStartIdx); // fired BEFORE avatar started talking
+    expect(beforeCmdIdx).toBeLessThan(speechIdx); // fired BEFORE final speech event
+  });
+
   test('disconnect and state transition to ended', async ({ page }) => {
     await page.goto('/tests/e2e/test-runner.html');
     await page.waitForFunction(() => typeof window.KalturaAvatarSDK !== 'undefined');
