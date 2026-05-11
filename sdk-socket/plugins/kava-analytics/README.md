@@ -50,7 +50,9 @@ new KalturaAvatarAnalytics(sdk, {
   partnerId: number,    // Kaltura partner ID
 
   // Optional (defaults shown)
-  clientTag: '',        // e.g., 'my-app:1.0.0'
+  clientTag: '',                    // e.g., 'my-app:1.0.0'
+  hostingApplication: 'avatarSdk', // Maps to server-side hostingKalturaApplication enum
+  hostingApplicationVer: '',       // Defaults to plugin version
   serviceUrl: 'https://analytics.kaltura.com/api_v3/index.php',
   requestMethod: 'POST',
   userId: '',           // User ID for attribution
@@ -83,7 +85,6 @@ kava.customEvent(eventType, { ...extraFields });    // any type
 
 ```javascript
 kava.setContextId('3:earnings');     // e.g., slideNum:category
-kava.setEntryId('entry_abc');
 kava.setContextType(1);              // 1=Entry, 2=Channel, 3=Global
 kava.setMetadata('customVar1', 'value');
 kava.setKS('new-ks-token');          // Update KS mid-session

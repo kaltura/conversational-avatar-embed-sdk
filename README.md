@@ -21,7 +21,7 @@ Add a real-time AI avatar to your app in under 5 minutes. Users talk to a lifeli
 | **Best for** | Full-featured apps needing control over video, events, and visuals | Quick embeds, sandboxed environments, or minimal integration |
 | **How it works** | Direct Socket.IO + WebRTC | Iframe + postMessage |
 | **You get** | Own the `<video>` element, real-time events, GenUI rendering, plugin system | Zero-config embed, automatic UI, browser sandbox isolation |
-| **Size** | ~100KB (+ Socket.IO) | ~6KB, zero dependencies |
+| **Size** | ~157KB (+ Socket.IO) | ~6KB, zero dependencies |
 | **GenUI** | Built-in renderers for charts, tables, code, diagrams, video, images | Event notifications only |
 | **Path** | [`sdk-socket/`](sdk-socket/) | [`sdk-iframe/`](sdk-iframe/) |
 
@@ -135,7 +135,8 @@ Run any demo locally: `python3 -m http.server 8080`
 sdk-socket/             ← Socket SDK: Direct Socket.IO + WebRTC
   ├── src/              ← Source code
   ├── dist/             ← Production bundle + TypeScript declarations
-  ├── tests/            ← 195 Playwright tests
+  ├── plugins/          ← Optional extensions (KAVA analytics)
+  ├── tests/            ← Playwright tests
   └── examples/demo/    ← Interactive demo
 
 sdk-iframe/             ← Iframe SDK: Sandboxed iframe embed
@@ -153,7 +154,7 @@ sdk-iframe/             ← Iframe SDK: Sandboxed iframe embed
 
 ```bash
 npm test                   # All tests (Iframe E2E + Socket unit)
-cd sdk-socket && npm test  # Socket SDK only (195 tests, ~15 seconds)
+cd sdk-socket && npm test  # Socket SDK tests (~25 seconds)
 npm run test:iframe        # Iframe SDK E2E only
 ```
 

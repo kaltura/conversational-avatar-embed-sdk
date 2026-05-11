@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.5.2
+ * @version 2.5.3
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.5.2';
+  const VERSION = '2.5.3';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -2972,15 +2972,19 @@
               this._socket,
               () => { if (timer) { clearTimeout(timer); timer = null; } },
               () => {
+                const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK').toLowerCase();
                 this._socket.emit('join', {
                   client: this._config.clientId,
-                  channel: this._roomId,
-                  userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK',
-                  channel_password: null,
+                  debugMode: false,
+                  room: this._roomId,
+                  userAgent: ua,
                   peer_name: this._config.peerName,
-                  peer_video: false,
+                  channel: this._roomId,
+                  channel_password: null,
+                  peer_video: true,
                   peer_audio: true,
-                  isMobile: false
+                  isMobile: false,
+                  ks: ''
                 });
                 this._state.transition(State.JOINING);
               },
@@ -3263,16 +3267,17 @@
         const query = {
           client: this._config.clientId,
           flowId: this._config.flowId,
-          level: 'published',
+          billed_client: '',
+          debugMode: false,
+          ks: '',
           stickyId: this._stickyId,
-          debugMode: 'true'
+          level: 'published'
         };
 
         this._log.info('Connecting to', socketUrl);
 
         this._socket = io(socketUrl, {
           path: this._config.endpoints.socketPath,
-          transports: ['websocket'],
           query
         });
 
@@ -3318,15 +3323,19 @@
           if (resolved || this._queue.active) return;
           this._log.warn('Server: all agent slots busy');
           const activated = this._queue.activate(this._socket, cancelTimeout, () => {
+            const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK').toLowerCase();
             this._socket.emit('join', {
               client: this._config.clientId,
-              channel: this._roomId,
-              userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK',
-              channel_password: null,
+              debugMode: false,
+              room: this._roomId,
+              userAgent: ua,
               peer_name: this._config.peerName,
-              peer_video: false,
+              channel: this._roomId,
+              channel_password: null,
+              peer_video: true,
               peer_audio: true,
-              isMobile: false
+              isMobile: false,
+              ks: ''
             });
             this._state.transition(State.JOINING);
           }, outerReject);
@@ -3353,18 +3362,36 @@
             agentName: data?.agentName || null,
             loadingVideoUrl: data?.loadingVideoURL || null
           });
-          this._socket.emit('setDebugMode', { debugMode: true });
+          const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK').toLowerCase();
+          this._socket.emit('isValidSession', {
+            client: this._config.clientId,
+            debugMode: false,
+            room: this._roomId,
+            userAgent: ua,
+            referrer: '',
+            clickId: this._roomId,
+            hashClickId: null,
+            level: 'published',
+            flowId: this._config.flowId
+          });
           this._socket.emit('join', {
             client: this._config.clientId,
-            channel: this._roomId,
-            userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK',
-            channel_password: null,
+            debugMode: false,
+            room: this._roomId,
+            userAgent: ua,
             peer_name: this._config.peerName,
-            peer_video: false,
+            channel: this._roomId,
+            channel_password: null,
+            peer_video: true,
             peer_audio: true,
-            isMobile: false
+            isMobile: false,
+            ks: ''
           });
           this._state.transition(State.JOINING);
+        });
+
+        this._socket.on('validSession', (data) => {
+          this._log.debug('Session validated', data);
         });
 
         this._socket.on('clientConfiguration', (data) => {
@@ -3387,7 +3414,16 @@
           this._log.debug('Join complete');
           this._state.transition(State.JOINED);
           this._preAcquireMic();
-          this._socket.emit('stvNewSession', { room_id: this._roomId, cast_mode: 'webrtc' });
+          const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : 'KalturaAvatarSDK').toLowerCase();
+          this._socket.emit('stvNewSession', {
+            client: this._config.clientId,
+            debugMode: false,
+            room: this._roomId,
+            userAgent: ua,
+            peer_name: this._config.peerName,
+            room_id: this._roomId,
+            cast_mode: 'rtmp'
+          });
         });
 
         this._socket.on('stvNewSession', (data) => {

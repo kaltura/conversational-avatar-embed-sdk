@@ -6,7 +6,16 @@ This document enables AI coding agents to build applications using the Kaltura A
 
 ## SDK Overview
 
-**Kaltura Avatar SDK** embeds an AI-powered video avatar in any website via iframe + postMessage.
+This guide covers **both** SDKs. Choose one based on your needs:
+
+| | **Socket SDK** (recommended) | **Iframe SDK** (simple) |
+|---|---|---|
+| **Control** | Full — you own the video, events, GenUI rendering | Minimal — sandboxed iframe |
+| **Size** | ~157KB + Socket.IO | ~6KB, zero deps |
+| **Integration** | Direct socket + WebRTC | Iframe + postMessage |
+| **Docs** | [Socket README](sdk-socket/README.md) | This file (below) |
+
+### Iframe SDK Quick Reference
 
 - Zero dependencies, ~6KB minified (UMD)
 - Load via CDN: `<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-iframe/kaltura-avatar-sdk.min.js"></script>`

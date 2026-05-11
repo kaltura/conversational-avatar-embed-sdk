@@ -31,7 +31,7 @@ Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowle
 - Types: `sdk-socket/dist/kaltura-avatar-sdk.d.ts`
 - Architecture: `sdk-socket/ARCHITECTURE.md`
 - Demo: `sdk-socket/examples/demo/index.html`
-- Tests: `sdk-socket/tests/e2e/` (243 tests via Playwright)
+- Tests: `sdk-socket/tests/e2e/` (Playwright)
 - Plugins: `sdk-socket/plugins/` (optional extensions — kava-analytics)
 - Peer dependency: Socket.IO client v4
 
@@ -53,7 +53,7 @@ Both connect to the same Kaltura AI Avatar backend — same avatars, same Knowle
 ```bash
 cd sdk-socket
 npm install
-npm test          # 243 unit + GenUI + analytics tests (~18s)
+npm test          # All standard tests (~25s)
 npm run test:all  # All including live integration
 ```
 
@@ -98,3 +98,18 @@ See `CONTRIBUTING.md` for the full checklist. The critical points:
 5. Wait 10 min, purge jsDelivr, verify `x-jsd-version` header
 
 **IMPORTANT: Always create a release tag and verify CDN deployment after pushing changes.** jsDelivr's `@latest` resolves to the latest GitHub release tag, not the latest commit. Without a release, changes are invisible to CDN consumers. Every version bump must be followed by `gh release create` + jsDelivr purge + verification.
+
+## Key Rules (Quick Reference)
+
+These invariants must never be violated:
+
+| Rule | Why |
+|------|-----|
+| Never reuse a git tag | jsDelivr caches permanently per version |
+| Reset text buffer only on `stvFinishedTalking` | Chunks arrive BEFORE `stvStartedTalking` |
+| Fire `approvedPermissions` only after video+mic ready | Otherwise avatar intro gets clipped |
+| Always provide submit AND skip for contact collection | Server hangs until one is called |
+| Mute mic during auto-pause | Prevents "are you still there" during video |
+| Keep `.d.ts` in sync manually | No TypeScript compilation in this project |
+| Test count should only go up | Never remove tests without replacing them |
+| Copy `src/` → `dist/` after every edit | Dist is the CDN-served file |

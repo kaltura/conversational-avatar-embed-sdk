@@ -10,7 +10,8 @@ Guidelines for humans and AI agents working on this repository.
 ├── sdk-socket/            ← Socket SDK (Direct Socket.IO + WebRTC)
 │   ├── src/               ← Source (single UMD file — edit this)
 │   ├── dist/              ← Built output (copy of src + .d.ts)
-│   ├── tests/             ← Playwright tests (195 tests)
+│   ├── plugins/           ← Optional extensions (KAVA analytics, etc.)
+│   ├── tests/             ← Playwright tests
 │   ├── examples/demo/     ← Interactive demo app
 │   ├── ARCHITECTURE.md    ← Internal architecture reference
 │   └── README.md          ← Developer-facing documentation
@@ -103,18 +104,22 @@ cp sdk-socket/src/kaltura-avatar-sdk.js sdk-socket/dist/kaltura-avatar-sdk.js
 cd sdk-socket && npm test
 
 # 4. If you changed the public API, update:
-#    - dist/kaltura-avatar-sdk.d.ts (TypeScript declarations)
+#    - dist/kaltura-avatar-sdk.d.ts (TypeScript declarations — MANUAL, no auto-generation)
 #    - README.md (documentation)
 #    - ARCHITECTURE.md (if internal structure changed)
+#
+# NOTE: The .d.ts file is hand-maintained. Any new public method,
+# config option, or event must be added manually. There is no
+# TypeScript compilation to catch missed declarations.
 ```
 
 ### Version Bumping
 
 Three places must be in sync:
 
-1. `src/kaltura-avatar-sdk.js` line 6: `@version X.Y.Z`
-2. `src/kaltura-avatar-sdk.js` line 23: `const VERSION = 'X.Y.Z'`
-3. `sdk-socket/package.json`: `"version": "X.Y.Z"`
+1. `src/kaltura-avatar-sdk.js` — `@version X.Y.Z` in the file header comment
+2. `src/kaltura-avatar-sdk.js` — `const VERSION = 'X.Y.Z'` near the top of the UMD body
+3. `sdk-socket/package.json` — `"version": "X.Y.Z"`
 
 Bump version only when releasing. Use semver:
 - **Patch** (2.3.x): Bug fixes, internal improvements
@@ -128,7 +133,7 @@ Tests run in Chromium via Playwright. Each test creates a fresh SDK instance wit
 ```bash
 cd sdk-socket
 npm install              # First time only
-npm test                 # 195 tests, ~15 seconds
+npm test                 # All standard tests, ~25 seconds
 npm run test:live        # Live server tests (needs credentials)
 npm run test:all         # Everything
 ```
@@ -196,7 +201,7 @@ sdk-iframe/examples/your_demo/
 ## CI
 
 GitHub Actions runs on every push and PR:
-- **test-socket**: 195 unit + GenUI + caption tests
+- **test-socket**: Unit + GenUI + analytics + resilience tests
 - **test-iframe**: HR Avatar and Code Interview E2E tests
 - **lint**: File size checks, JSON schema validation
 

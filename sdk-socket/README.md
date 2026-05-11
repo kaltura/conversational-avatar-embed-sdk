@@ -19,6 +19,17 @@ Choose the [Iframe SDK](../sdk-iframe/) instead when you want drop-in simplicity
 
 ---
 
+## Prerequisites: Get Your Client ID and Flow ID
+
+1. Go to **Kaltura Studio** (studio.kaltura.com or your organization's instance)
+2. Open or create an **AI Avatar agent**
+3. Look in the **Embed / Integration** settings
+4. Copy the **Client ID** (a long number) and **Flow ID** (like "agent-1")
+
+You'll need both values for the Quick Start below.
+
+---
+
 ## Quick Start (5 minutes)
 
 ### Step 1: Add two script tags
@@ -60,15 +71,6 @@ That's it. The avatar video will render, the microphone will be requested, and t
 
 ---
 
-## Where to Get Your Client ID and Flow ID
-
-1. Go to **Kaltura Studio** (studio.kaltura.com or your organization's instance)
-2. Open or create an **AI Avatar agent**
-3. Look in the **Embed / Integration** settings
-4. Copy the **Client ID** (a long number) and **Flow ID** (like "agent-1")
-
----
-
 ## Complete Working Example
 
 ```html
@@ -101,6 +103,11 @@ That's it. The avatar video will render, the microphone will be requested, and t
       console.log('Avatar:', text);
     });
 
+    // Handle errors gracefully
+    sdk.on('error', (err) => {
+      console.error('SDK error:', err.message, '(code:', err.code + ')');
+    });
+
     // Send text to the avatar (instead of speaking)
     function send() {
       const input = document.getElementById('message');
@@ -108,7 +115,9 @@ That's it. The avatar video will render, the microphone will be requested, and t
       input.value = '';
     }
 
-    sdk.connect();
+    sdk.connect().catch(err => {
+      console.error('Connection failed:', err.message);
+    });
   </script>
 </body>
 </html>
@@ -1013,6 +1022,7 @@ When something goes wrong, the `'error'` event gives you an `AvatarError` with a
 | 1003 | CONNECTION_LOST | Connection dropped during session | SDK will auto-reconnect if enabled |
 | 1004 | JOIN_FAILED | Couldn't join the room | Check flowId |
 | 1005 | FLOW_CONFIG_ERROR | Invalid clientId or flowId | Double-check your credentials in Kaltura Studio |
+| 1006 | HANDSHAKE_TIMEOUT | Socket connected but server didn't respond to handshake | Server may be overloaded; SDK activates queue if enabled |
 | 2001 | MIC_PERMISSION_DENIED | User blocked microphone | SDK continues in text-only mode |
 | 2002 | MIC_NOT_AVAILABLE | No microphone found | SDK continues in text-only mode |
 | 2003 | WHEP_NEGOTIATION_FAILED | Video stream setup failed | SDK falls back to audio-only |
@@ -1114,18 +1124,18 @@ The socket stays alive during the entire wait. No reconnection, no new handshake
 If you're curious what happens when you call `sdk.connect()`:
 
 ```
-1. Socket.IO connects to the avatar server
-2. Server responds with "onServerConnected"
-3. SDK joins a room (like joining a video call)
-4. Server responds with "joinComplete"
-5. SDK requests a new avatar session (with video mode)
+1. Socket.IO connects to the avatar server (polling → WebSocket upgrade)
+2. Server responds with "onServerConnected" (agent name, loading video)
+3. SDK validates the session ("isValidSession") and joins the room
+4. Server confirms "validSession" and "joinComplete"
+5. SDK requests a new avatar session (stvNewSession with cast_mode: rtmp)
 6. Server responds with a session ID
-7. SDK negotiates WebRTC video (WHEP protocol)
+7. SDK negotiates WebRTC video via WHEP (WebRTC-HTTP Egress Protocol)
 8. Video starts streaming to your <video> element
-9. SDK requests microphone permission
+9. SDK requests microphone permission (pre-acquired during join)
 10. Once both video + mic are ready → SDK tells server "approvedPermissions"
-11. Avatar starts speaking its greeting
-12. You're in a conversation!
+11. SDK establishes ASR WebRTC (Automatic Speech Recognition — send-only audio)
+12. Avatar starts speaking its greeting — you're in a conversation!
 ```
 
 ---
@@ -1136,10 +1146,15 @@ The SDK handles failures automatically:
 
 | What Fails | What Happens | User Experience |
 |------------|--------------|-----------------|
-| Video stream | Falls back to audio-only | User hears avatar but doesn't see it |
+| Network unreachable | 15s timeout → auto-reconnect with exponential backoff | Brief delay, then connects |
+| Server connected but silent | Handshake timeout → activates queue or retries | Seamless retry |
+| All agent slots busy | Queue polling (30s → 45s → 1m → ... → cycle) | User waits, connects when available |
+| Video stream | Falls back to audio-only automatically | User hears avatar but doesn't see it |
+| Video WebRTC drops mid-call | Auto re-negotiates video stream | Video resumes without interruption |
 | Microphone denied | Switches to text-only mode | User types instead of speaks |
-| Connection drops | Auto-reconnects (up to 5 times) | Brief pause, then continues |
-| All reconnects fail | Emits error event | You decide what to show |
+| Connection drops mid-session | Auto-reconnects (up to 5 attempts, exponential backoff + jitter) | Brief pause, then continues |
+| All reconnects fail | Emits error event with recoverable=false | You decide what to show |
+| Account tier exceeded | Permanent error, no retry | Immediate clear feedback |
 
 ---
 
@@ -1164,10 +1179,11 @@ Load directly from GitHub via jsDelivr (no npm install needed):
 <script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-socket/dist/kaltura-avatar-sdk.js"></script>
 ```
 
-Pin to a specific version:
+Pin to a specific release tag (recommended for production):
 ```html
-<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@v2.0.0/sdk-socket/dist/kaltura-avatar-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@vX.Y.Z/sdk-socket/dist/kaltura-avatar-sdk.js"></script>
 ```
+Replace `vX.Y.Z` with the latest release tag from the [releases page](https://github.com/kaltura/conversational-avatar-embed-sdk/releases).
 
 ---
 
@@ -1185,7 +1201,7 @@ Optional extensions live in `plugins/`:
 
 | Plugin | Description | Size |
 |--------|-------------|------|
-| [KAVA Analytics](plugins/kava-analytics/README.md) | Reports Immersive Agent events + standard KAVA events to Kaltura analytics | ~12KB |
+| [KAVA Analytics](plugins/kava-analytics/README.md) | Reports Immersive Agent events + standard KAVA events to Kaltura analytics | ~24KB |
 
 ```html
 <script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-socket/plugins/kava-analytics/kaltura-avatar-analytics.js"></script>
@@ -1198,15 +1214,40 @@ const kava = new KalturaAvatarAnalytics(sdk, { ks: 'your-ks', partnerId: 12345 }
 
 ---
 
+## Security & CSP
+
+The SDK is designed for Content Security Policy (CSP) restricted environments:
+
+- **No `eval()` or `new Function()`** — safe for `script-src` without `'unsafe-eval'`
+- **No inline event handlers** — no `onclick="..."` attributes
+- **No `innerHTML` on user data** — prevents XSS; uses `textContent` and DOM APIs
+- **Exception:** The `showHtml` GenUI renderer uses `innerHTML` for server-controlled content. If you use strict CSP, ensure your policy trusts the Kaltura server origin.
+
+**Required CSP directives** (minimum):
+
+```
+connect-src: wss://*.kaltura.ai https://*.kaltura.ai https://cdn.jsdelivr.net;
+media-src: blob: https://*.kaltura.ai;
+script-src: 'self' https://cdn.jsdelivr.net https://cdn.socket.io;
+```
+
+If using the KAVA analytics plugin, also add:
+```
+connect-src: https://analytics.kaltura.com;
+```
+
+---
+
 ## Running Tests
 
 ```bash
 cd sdk-socket
 npm install
-npm test                   # Unit + GenUI + analytics tests (243 tests, ~18 seconds)
+npm test                   # All standard tests (~25 seconds)
 npm run test:analytics     # Analytics plugin tests only
-npm run test:live          # Live integration tests (connects to real server)
-npm run test:all           # All tests
+npm run test:live          # Live server integration tests
+npx playwright test tests/e2e/network-throttle.spec.js  # Network throttle tests (live)
+npm run test:all           # Everything including live tests
 ```
 
 ---

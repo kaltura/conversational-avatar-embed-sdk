@@ -6,14 +6,21 @@ Internal reference for developers and AI agents contributing to `sdk-socket/src/
 
 ## File Structure
 
-The entire SDK is a single ~3600-line UMD file. No build step, no bundler, no transpilation. The dist file is a direct copy of the source.
+The entire SDK is a single UMD file. No build step, no bundler, no transpilation. The dist file is a direct copy of the source.
 
 ```
 sdk-socket/
 ├── src/kaltura-avatar-sdk.js     ← Single source file (edit this)
 ├── dist/kaltura-avatar-sdk.js    ← Exact copy of src (commit both)
 ├── dist/kaltura-avatar-sdk.d.ts  ← TypeScript declarations (manual)
-├── tests/e2e/sdk-unit.spec.js    ← 195 Playwright-based unit tests
+├── plugins/kava-analytics/       ← Optional KAVA analytics plugin
+├── tests/e2e/                    ← Playwright-based tests
+│   ├── sdk-unit.spec.js          ← Core SDK unit tests
+│   ├── genui.spec.js             ← GenUI rendering tests
+│   ├── analytics.spec.js         ← KAVA plugin tests
+│   ├── analytics-integration.spec.js ← Plugin integration tests
+│   ├── network-resilience.spec.js← Network resilience tests
+│   └── demo-smoke.spec.js        ← Demo app smoke tests
 ├── examples/demo/index.html      ← Interactive demo
 └── package.json
 ```
@@ -62,45 +69,51 @@ All classes are defined inside the UMD factory function (not exported individual
 User calls sdk.connect()
        │
        ▼
-┌─────────────────────────────┐
-│ 1. Socket.IO connects       │  State: CONNECTING → CONNECTED
-│    socket.connect()         │
-└──────────────┬──────────────┘
-               │ 'onServerConnected'
-               ▼
-┌─────────────────────────────┐
-│ 2. Join room                │  State: CONNECTED → JOINING → JOINED
-│    socket.emit('joinRoom')  │
-└──────────────┬──────────────┘
-               │ 'joinComplete'
-               ▼
-┌─────────────────────────────┐
-│ 3. Start mic + video        │  (parallel)
-│    _preAcquireMic()         │
-│    _startMedia()            │
-└──────────────┬──────────────┘
-               │
-       ┌───────┴───────┐
-       ▼               ▼
-┌─────────────┐  ┌──────────────────────────────────┐
-│ Mic ready   │  │ WHEP negotiate                   │
-│ getUserMedia│  │ → SDP exchange                   │
-│ _micReady=1 │  │ → wait for video track arrival   │
-└──────┬──────┘  │ → wait for canplay event         │
-       │         │ → 300ms jitter buffer delay      │
-       │         │ _videoReady = true               │
-       │         └──────────────┬───────────────────┘
-       │                        │
-       └────────┬───────────────┘
-                ▼
-┌─────────────────────────────┐
-│ 4. _checkApprovePermissions │  Both _micReady && _videoReady
-│    socket.emit(             │  State: JOINED → IN_CONVERSATION
-│      'approvedPermissions') │
-└──────────────┬──────────────┘
-               │
-               ▼
-       Avatar speaks intro
+┌──────────────────────────────────────────────────────┐
+│ 1. Socket.IO connects (polling → WebSocket upgrade)  │  State: CONNECTING → CONNECTED
+│    Query: client, flowId, billed_client, debugMode,  │
+│           ks, stickyId, level                        │
+└──────────────────────┬───────────────────────────────┘
+                       │ 'onServerConnected' { agentName, loadingVideoURL }
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│ 2. Validate session + join room                      │  State: CONNECTED → JOINING
+│    emit('isValidSession', {client, debugMode,        │
+│      room, userAgent, referrer, clickId,             │
+│      hashClickId, level, flowId})                    │
+│    emit('join', {client, debugMode, room,            │
+│      userAgent, peer_name, channel,                  │
+│      peer_video:true, peer_audio:true, ks})          │
+└──────────────────────┬───────────────────────────────┘
+                       │ 'validSession' + 'joinComplete'
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│ 3. New avatar session                                │  State: JOINING → JOINED
+│    emit('stvNewSession', {client, debugMode, room,   │
+│      userAgent, peer_name, room_id, cast_mode:'rtmp'})│
+│    _preAcquireMic() — getUserMedia (parallel)        │
+└──────────────────────┬───────────────────────────────┘
+                       │ 'stvNewSession' { session_id }
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│ 4. Start media (parallel)                            │
+│    ├─ WHEP negotiate (POST SDP to SRS server)        │
+│    │   → wait for video track arrival                │
+│    │   → wait for canplay event                      │
+│    │   → 300ms jitter buffer delay                   │
+│    │   → _videoReady = true                          │
+│    └─ Mic ready (_micReady = true)                   │
+└──────────────────────┬───────────────────────────────┘
+                       │ Both _micReady && _videoReady
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│ 5. Approve permissions                               │  State: JOINED → IN_CONVERSATION
+│    emit('approvedPermissions')                       │
+│    Start ASR WebRTC (send-only for speech-to-text)   │
+└──────────────────────┬───────────────────────────────┘
+                       │
+                       ▼
+               Avatar speaks intro
 ```
 
 **Critical timing:** `approvedPermissions` tells the server "start talking." If we fire it before video/audio pipeline is ready, the intro gets clipped. The 300ms post-canplay delay ensures the WebRTC jitter buffer has filled.
@@ -166,7 +179,7 @@ Server → 'agentTurnToTalk' { userTranscription } (turn complete)
   TranscriptManager.add('User', text)
 ```
 
-**Key:** `userStartedTalking` is a non-debug event — it fires without debug mode. The `debug_vad_speech_detected` interim transcripts require `setDebugMode: { debugMode: true }` (the SDK enables this automatically).
+**Key:** `userStartedTalking` is a non-debug event — it fires without debug mode. The `debug_vad_speech_detected` interim transcripts require debug mode enabled on the server — the SDK requests this implicitly via the connection parameters.
 
 ---
 
@@ -272,34 +285,107 @@ CaptionManager.interrupt()
 
 ```
 sdk.connect()
-  └─> _initSocket(cancelTimeout, outerReject)
-       ├─ socket connects → 'onServerConnected' → emit 'join'
+  └─> _connectWithQueue() — wraps _initSocket with timeout logic
        │
-       ├─ NORMAL: joinComplete → showAgent → resolve ✓
+       ├─ 15s timer starts (_socketConnected tracks transport state)
        │
-       ├─ QUEUE: 'throwToNoAgent' fires
-       │   ├─ queue.enabled=false → reject(CAPACITY_UNAVAILABLE)
-       │   └─ queue.enabled=true → QueueManager.activate()
-       │        ├─ cancelTimeout() — disables 15s deadline
-       │        ├─ emits 'queue-started'
-       │        ├─ waits delays[0]=30s → checkAvailability
-       │        │   └─ availabilityResult { available: false }
-       │        │        └─ waits delays[1]=45s → poll again...
-       │        │   └─ availabilityResult { available: true }
-       │        │        ├─ emits 'queue-available'
-       │        │        └─ re-emits 'join' (same socket)
-       │        │             └─ joinComplete → showAgent → resolve ✓
-       │        └─ maxWaitMs exceeded → reject(QUEUE_TIMEOUT)
-       │
-       └─ HARD FAIL: 'throwToExceededTier' → reject(TIER_EXCEEDED)
+       └─> _initSocket(cancelTimeout, outerReject)
+            ├─ socket connects (polling→WS) → _socketConnected = true
+            │   └─ 'onServerConnected' → emit 'isValidSession' + 'join'
+            │
+            ├─ NORMAL: joinComplete → stvNewSession → showAgent → resolve ✓
+            │
+            ├─ HANDSHAKE: 15s timeout fires with _socketConnected=true
+            │   ├─ Server connected at transport level but never responded
+            │   ├─ queue.enabled=true → QueueManager.activate()
+            │   └─ queue.enabled=false → reject(HANDSHAKE_TIMEOUT, 1006)
+            │
+            ├─ TIMEOUT: 15s timer fires with _socketConnected=false
+            │   └─ reject(CONNECTION_TIMEOUT, 1002)
+            │
+            ├─ QUEUE: 'throwToNoAgent' fires
+            │   ├─ queue.enabled=false → reject(CAPACITY_UNAVAILABLE, 6001)
+            │   └─ queue.enabled=true → QueueManager.activate()
+            │        ├─ cancelTimeout() — disables 15s deadline
+            │        ├─ emits 'queue-started'
+            │        ├─ waits delays[0]=30s → checkAvailability
+            │        │   └─ availabilityResult { available: false }
+            │        │        └─ waits delays[1]=45s → poll again...
+            │        │   └─ availabilityResult { available: true }
+            │        │        ├─ emits 'queue-available'
+            │        │        └─ re-emits 'join' (same socket)
+            │        │             └─ joinComplete → showAgent → resolve ✓
+            │        └─ maxWaitMs exceeded → reject(QUEUE_TIMEOUT, 6003)
+            │
+            └─ HARD FAIL: 'throwToExceededTier' → reject(TIER_EXCEEDED, 6002)
 ```
 
 **Key design decisions:**
+- Transport uses Socket.IO default (polling → WebSocket upgrade) — matches production, works through proxies
+- `isValidSession` is emitted immediately after `onServerConnected` — this is the session handshake acknowledgment
 - State stays `CONNECTING` throughout queue wait — no new state machine states needed
 - Socket remains alive during wait; re-emit `join` on the same connection when available
 - Delay cycle: `[30s, 45s, 1m, 1.5m, 2m, 3m, 4m, 5m, 6m]` — wraps via modulo, infinite
 - `connectionTimeout` (15s) is cancelled when queue activates — queue manages its own timeout via `maxWaitMs`
+- Handshake timeout: if socket connects but server never sends `onServerConnected`/`throwToNoAgent`, the 15s timer fires and distinguishes "transport connected, server silent" (HANDSHAKE_TIMEOUT, activates queue) from "transport failed" (CONNECTION_TIMEOUT)
 - Default `maxWaitMs: 0` = wait forever (suitable for kiosks, embedded displays)
+
+---
+
+## Protocol & Transport Details
+
+### Socket Query Parameters
+
+Every Socket.IO connection sends these query params (visible in the URL):
+
+| Param | Source | Purpose |
+|-------|--------|---------|
+| `client` | `config.clientId` | Identifies the Kaltura account |
+| `flowId` | `config.flowId` | Which avatar agent to connect to |
+| `billed_client` | Always `''` | Reserved for future partner billing delegation (not yet implemented) |
+| `debugMode` | Always `false` | Server-side debug mode. Hardcoded off — the SDK does not expose this to users. Server-side speech events (`debug_stvTaskGenerated`, `debug_vad_speech_detected`) arrive regardless of this flag despite their naming. |
+| `ks` | Always `''` | Kaltura Session token. Currently empty (anonymous sessions). Apps needing authenticated analytics use the KAVA plugin's separate KS config, not this connection param. |
+| `stickyId` | `generateId(8) + generateId(8)` (16 chars) | Session affinity token — ensures the load balancer routes all requests for this session to the same conversation-manager pod. Generated fresh per `connect()` call. Without it, polling requests could hit different pods before the WebSocket upgrade completes. |
+| `level` | Always `'published'` | Content level filter (published = production agent, draft = staging) |
+
+### `cast_mode: 'rtmp'`
+
+Sent in the `stvNewSession` payload. Tells the server which video ingest pipeline to use for the avatar's face animation:
+
+- `'rtmp'` — Server renders the avatar face, ingests video via RTMP into SRS (Simple Realtime Server). Client receives video via WHEP (WebRTC-HTTP Egress Protocol). This is the production path.
+- The client never sends or receives RTMP directly — it's purely server-side between the face renderer and the SRS origin.
+- WHEP means the client only needs a standard WebRTC receive connection — no media server SDK, no RTMP client.
+
+### ASR (Automatic Speech Recognition) WebRTC
+
+After `approvedPermissions`, the SDK establishes a second, independent WebRTC peer connection specifically for sending the user's microphone audio to the server:
+
+```
+Client (send-only)  ──── WebRTC audio track ────►  Server (ASR engine)
+                                                         │
+                                                         ▼
+                                                   Transcription
+                                                         │
+                                                         ▼
+                               Socket.IO events ◄─── 'debug_vad_speech_detected'
+                                                     'agentTurnToTalk'
+                                                     'userStartedTalking'
+```
+
+**Why a separate WebRTC connection (not reusing WHEP)?**
+- WHEP is receive-only by design (HTTP egress protocol)
+- ASR needs send-only (user mic → server)
+- Separating them allows independent ICE negotiation, failure isolation, and different TURN policies (`iceTransportPolicy: 'all'` for ASR vs `'relay'` for WHEP)
+
+**Signaling flow:**
+1. SDK emits `asr-webrtc-init` with the socket ID as session identifier
+2. Server responds `asr-webrtc-ready` when its ASR peer connection is prepared
+3. SDK creates offer, adds mic track, emits `asr-webrtc-offer`
+4. Server responds `asr-webrtc-answer` with SDP answer
+5. ICE candidates exchanged via `asr-webrtc-ice-candidate` (both directions, trickle ICE)
+6. Connection established — audio flows, server begins transcription
+
+**Resilience:** If ASR fails (timeout, ICE failure, no mic), the SDK continues without speech recognition — the user can still interact via `sdk.sendText()`. ASR failure is non-fatal and logged as a warning.
 
 ---
 
@@ -320,17 +406,22 @@ Valid transitions are enforced. Invalid transitions throw `AvatarError(INVALID_S
 
 ## WebRTC Architecture
 
-Two separate WebRTC connections:
+Two separate, independent WebRTC connections (see Protocol & Transport Details above for full ASR signaling):
 
 1. **WHEP (receive-only)** — avatar video + audio FROM server
-   - Uses HTTP-based SDP exchange (POST to WHEP endpoint)
+   - Uses HTTP-based SDP exchange (POST to `srs.avatar.us.kaltura.ai/rtc/v1/whep/`)
    - Receive-only: `addTransceiver('audio/video', { direction: 'recvonly' })`
+   - Stream ID = session_id from `stvNewSession` response
+   - ICE transport policy: `relay` (always via TURN for NAT traversal reliability)
    - Fallback: if WHEP fails, `AudioFallback` uses Socket.IO binary frames
+   - Auto-renegotiation: if ICE state becomes `failed`/`disconnected` mid-call, SDK closes and re-negotiates
 
 2. **ASR (send-only)** — user microphone audio TO server
-   - Standard WebRTC offer/answer via socket signaling
+   - Socket.IO signaling (offer/answer/ICE via `asr-webrtc-*` events)
    - Send-only: `addTrack(micStream.getAudioTracks()[0])`
-   - Server performs speech-to-text and returns transcription events
+   - ICE transport policy: `all` (direct + relay — more permissive for low-latency audio)
+   - Non-fatal: if ASR fails, SDK continues in text-only mode
+   - Server performs speech-to-text and emits transcription events back via Socket.IO
 
 ---
 
@@ -391,9 +482,12 @@ Tests run in a real browser (Chromium) via Playwright. The SDK is loaded into th
 
 ```bash
 cd sdk-socket
-npm test           # 195 tests, ~15 seconds
-npm run test:live  # Live server integration tests
-npm run test:all   # Everything
+npm test           # All standard tests (unit + genui + analytics + resilience)
+npm run test:analytics      # Analytics plugin tests only
+npm run test:analytics:live # Live analytics integration (requires KALTURA_KS)
+npm run test:live           # Live server integration tests
+npx playwright test tests/e2e/network-throttle.spec.js  # Live network throttle tests
+npm run test:all            # Everything
 ```
 
 Test structure:
