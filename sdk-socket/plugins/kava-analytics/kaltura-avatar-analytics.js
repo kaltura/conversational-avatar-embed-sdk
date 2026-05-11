@@ -55,10 +55,22 @@
     GLOBAL: 3
   });
 
+  const HostingApplication = Object.freeze({
+    GENIE: 23,
+    AGENTS: 25,
+    MODELS_SDK: 26,
+    CONVERSATION_MANAGER: 27,
+    AVATAR_VIDEOS: 28,
+    AGENTIC_AVATARS_STUDIO: 29,
+    UNISPHERE_OS: 30,
+    KAI_VENDOR: 31
+  });
+
   const Defaults = Object.freeze({
     SERVICE_URL: 'https://analytics.kaltura.com/api_v3/index.php',
     REQUEST_METHOD: 'POST',
-    MAX_TEXT_LENGTH: 50
+    MAX_TEXT_LENGTH: 50,
+    HOSTING_APPLICATION: HostingApplication.AGENTIC_AVATARS_STUDIO
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -73,15 +85,6 @@
       const r = (Math.random() * 16) | 0;
       return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
     });
-  }
-
-  function encodeReferrer() {
-    try {
-      const ref = document.referrer || document.location.href;
-      return btoa(ref).slice(0, 256);
-    } catch (e) {
-      return '';
-    }
   }
 
   function truncate(str, maxLen) {
@@ -187,7 +190,6 @@
       this._config = config;
       this._session = session;
       this._contextId = '';
-      this._entryId = '';
       this._contextType = '';
       this._metadata = {};
     }
@@ -202,18 +204,15 @@
         sessionId: this._session.sessionId,
         threadId: this._session.threadId,
         eventIndex: this._session.eventIndex,
-        clientVer: 'avatar-analytics:' + VERSION,
-        referrer: encodeReferrer()
+        hostingKalturaApplication: this._config.hostingApplication,
+        hostingKalturaApplicationVer: this._config.hostingApplicationVer
       };
 
+      if (this._config.agentId) params.agentId = truncate(this._config.agentId, Defaults.MAX_TEXT_LENGTH);
+      if (this._config.genieId) params.genieId = truncate(this._config.genieId, Defaults.MAX_TEXT_LENGTH);
       if (this._config.clientTag) params.clientTag = this._config.clientTag;
-      if (this._config.hostingApp) params.hostingKalturaApplication = this._config.hostingApp;
-      if (this._config.hostingAppVer) params.hostingKalturaApplicationVer = this._config.hostingAppVer;
-      if (this._config.agentId) params.agentId = this._config.agentId;
-      if (this._config.genieId) params.genieId = this._config.genieId;
       if (this._config.userId) params.userId = this._config.userId;
       if (this._contextId) params.contextId = truncate(this._contextId, Defaults.MAX_TEXT_LENGTH);
-      if (this._entryId) params.entryId = this._entryId;
       if (this._contextType) params.contextType = this._contextType;
 
       for (const [key, value] of Object.entries(this._metadata)) {
@@ -272,7 +271,6 @@
     }
 
     setContextId(id) { this._contextId = id; }
-    setEntryId(id) { this._entryId = id; }
     setContextType(type) { this._contextType = type; }
     setMetadata(key, value) { this._metadata[key] = value; }
   }
@@ -338,9 +336,9 @@
         partnerId: config.partnerId,
         agentId: config.agentId || (sdk.getFlowId ? sdk.getFlowId() : ''),
         genieId: config.genieId || (sdk.getClientId ? sdk.getClientId() : ''),
+        hostingApplication: config.hostingApplication != null ? config.hostingApplication : Defaults.HOSTING_APPLICATION,
+        hostingApplicationVer: config.hostingApplicationVer || VERSION,
         clientTag: config.clientTag || '',
-        hostingApp: config.hostingApp || '',
-        hostingAppVer: config.hostingAppVer || '',
         serviceUrl: config.serviceUrl || Defaults.SERVICE_URL,
         requestMethod: config.requestMethod || Defaults.REQUEST_METHOD,
         userId: config.userId || '',
@@ -534,7 +532,6 @@
     // ─────────────────────────────────────────────────────────────────────────
 
     setContextId(id) { this._builder.setContextId(id); }
-    setEntryId(id) { this._builder.setEntryId(id); }
     setContextType(type) { this._builder.setContextType(type); }
     setMetadata(key, value) { this._builder.setMetadata(key, value); }
 
@@ -597,6 +594,7 @@
   KalturaAvatarAnalytics.ResponseType = ResponseType;
   KalturaAvatarAnalytics.ReactionType = ReactionType;
   KalturaAvatarAnalytics.ContextType = ContextType;
+  KalturaAvatarAnalytics.HostingApplication = HostingApplication;
 
   return KalturaAvatarAnalytics;
 }));

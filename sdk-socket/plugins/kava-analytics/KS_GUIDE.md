@@ -133,12 +133,13 @@ If decryption fails, the event is **still processed** — just without KS-derive
 ### 3. Privilege Extraction
 If decryption succeeds, the server extracts these fields from the KS privileges string:
 
-| KS Privilege | Output Field | Overrides Param? |
+| KS Privilege | Output Field | Format |
 |---|---|---|
-| `virtualeventid:<id>` | `virtualEventId` | Yes — KS value takes priority over request param |
-| `agentid:<id>` | `agentId` | Yes — KS value takes priority |
-| `genieid:<id>` | `genieId` | Yes — KS value takes priority |
-| `preview:true` | `preview` | Yes |
+| `appid:<name>-<domain>` | `application` + `domain` | Split on first `-`: name = before, domain = after |
+| `virtualeventid:<id>` | `virtualEventId` | Numeric or string ID |
+| `agentid:<id>` | `agentId` | The avatar flow/agent ID |
+| `genieid:<id>` | `genieId` | The embed/client ID |
+| `preview:true` | `preview` | Boolean flag |
 
 ### 4. Server-Side Enrichment Adds
 After KS parsing, the server enriches the event with:
@@ -174,31 +175,44 @@ After KS parsing, the server enriches the event with:
 
 ## KS Privileges for Avatar Analytics
 
-### Minimal (anonymous analytics — most common)
+### Minimal (anonymous, no app tracking)
 
 ```
 view:*,widget:1
 ```
 
-This is what `startWidgetSession` generates by default. Sufficient for all basic analytics reporting.
+This is what `startWidgetSession` generates by default. Events will be accepted but without application or agent attribution.
 
-### With Virtual Event ID (for virtual event tracking)
-
-```
-view:*,widget:1,virtualeventid:YOUR_EVENT_ID
-```
-
-Embeds a virtual event context. The server extracts this and adds it to all events, enabling per-event analytics filtering in dashboards.
-
-### With All Avatar Privileges (embedded enrichment)
+### With Application Identity (required for analytics attribution)
 
 ```
-view:*,widget:1,virtualeventid:YOUR_EVENT_ID,agentid:YOUR_AGENT_ID,genieid:YOUR_CLIENT_ID
+view:*,widget:1,appid:YOUR_APP_NAME-YOUR_DOMAIN
 ```
 
-Embeds agentId and genieId directly in the KS. The server will use these values (overriding any explicit params). This is useful if you want server-authoritative identity rather than trusting client-supplied params.
+The `appid` privilege identifies your application. Format: `appid:<appName>-<appDomain>` where:
+- `<appName>` — unique string identifying your app (no hyphens — first `-` is the delimiter)
+- `<appDomain>` — the domain hosting the app
 
-**Note:** For the Avatar SDK plugin, `agentId` and `genieId` are auto-read from `sdk.getFlowId()` and `sdk.getClientId()` and sent as explicit params. Embedding them in the KS is optional — it only matters if you need server-side override authority.
+The server splits on the **first hyphen**: `appid:earningsAvatar-investor.example.com` → application=`earningsAvatar`, domain=`investor.example.com`.
+
+### With Agent and Genie Identity (recommended for Avatar apps)
+
+```
+view:*,widget:1,appid:YOUR_APP_NAME-YOUR_DOMAIN,agentid:YOUR_AGENT_ID,genieid:YOUR_CLIENT_ID
+```
+
+The app should read these values from the SDK and embed them in the KS privileges:
+- `appid` ← your app name + domain
+- `agentid` ← `sdk.getFlowId()` (the avatar flow/agent ID)
+- `genieid` ← `sdk.getClientId()` (the embed/client ID)
+
+The server extracts these from the KS and uses them authoritatively for all events. The plugin does **not** send these as explicit request params — the KS is the single source of truth.
+
+### Full privileges string (all fields)
+
+```
+view:*,widget:1,appid:YOUR_APP_NAME-YOUR_DOMAIN,agentid:YOUR_AGENT_ID,genieid:YOUR_CLIENT_ID,virtualeventid:YOUR_EVENT_ID
+```
 
 ---
 
@@ -229,44 +243,55 @@ The plugin **never** generates, refreshes, or validates the KS. This is the app'
 ## Complete Integration Example
 
 ```javascript
-// ── KS Generation (client-side for simplicity) ──
+// ── KS Generation (server-side recommended, client-side shown for clarity) ──
 const PARTNER_ID = YOUR_PARTNER_ID;
+const APP_NAME = 'myAvatarApp';
+const APP_DOMAIN = 'example.com';
 
 async function initAnalytics(sdk) {
-  // Get widget KS
+  // Read identity from SDK to embed in KS privileges
+  const agentId = sdk.getFlowId();
+  const genieId = sdk.getClientId();
+
+  // Build privileges string with all required fields
+  const privileges = [
+    'view:*',
+    'widget:1',
+    `appid:${APP_NAME}-${APP_DOMAIN}`,
+    `agentid:${agentId}`,
+    `genieid:${genieId}`
+  ].join(',');
+
+  // Generate KS with embedded privileges (server-side in production)
+  const ks = await generateKS(PARTNER_ID, { privileges });
+
+  // Attach analytics plugin
+  const kava = new KalturaAvatarAnalytics(sdk, {
+    ks: ks,
+    partnerId: PARTNER_ID
+  });
+
+  // Optional: refresh KS every 20 hours (before 24h expiry)
+  setInterval(async () => {
+    const freshKs = await generateKS(PARTNER_ID, { privileges });
+    kava.setKS(freshKs);
+  }, 20 * 60 * 60 * 1000); // 20 hours
+
+  return kava;
+}
+
+// Helper: start a widget session (client-side fallback — no agentId/genieId embedding)
+async function getWidgetKS(partnerId) {
   const res = await fetch(
     'https://cdnapisec.kaltura.com/api_v3/service/session/action/startWidgetSession?format=1',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ widgetId: `_${PARTNER_ID}` })
+      body: JSON.stringify({ widgetId: `_${partnerId}` })
     }
   );
   const { ks } = await res.json();
-
-  // Attach analytics plugin
-  const kava = new KalturaAvatarAnalytics(sdk, {
-    ks: ks,
-    partnerId: PARTNER_ID,
-    hostingApp: 'my-avatar-app',
-    hostingAppVer: '1.0.0'
-  });
-
-  // Optional: refresh KS every 20 hours (before 24h expiry)
-  setInterval(async () => {
-    const refresh = await fetch(
-      'https://cdnapisec.kaltura.com/api_v3/service/session/action/startWidgetSession?format=1',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ widgetId: `_${PARTNER_ID}` })
-      }
-    );
-    const { ks: freshKs } = await refresh.json();
-    kava.setKS(freshKs);
-  }, 20 * 60 * 60 * 1000); // 20 hours
-
-  return kava;
+  return ks;
 }
 ```
 

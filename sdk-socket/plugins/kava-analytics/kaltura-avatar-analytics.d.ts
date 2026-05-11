@@ -4,20 +4,20 @@
  */
 
 export interface AnalyticsConfig {
-  /** Kaltura Session token (required — provided by app) */
+  /** Kaltura Session token (required — provided by app, see KS_GUIDE.md) */
   ks: string;
   /** Kaltura partner ID (required) */
   partnerId: number | string;
-  /** Agent ID override (default: auto-read from sdk.getFlowId()) */
+  /** Agent ID fallback (default: auto-read from sdk.getFlowId(); KS privilege takes precedence server-side) */
   agentId?: string;
-  /** Genie ID override (default: auto-read from sdk.getClientId()) */
+  /** Genie ID fallback (default: auto-read from sdk.getClientId(); KS privilege takes precedence server-side) */
   genieId?: string;
+  /** Hosting application numeric enum (default: 29 = Agentic Avatars Studio) */
+  hostingApplication?: number;
+  /** Hosting application version (default: plugin VERSION) */
+  hostingApplicationVer?: string;
   /** Client tag for event attribution (e.g., 'my-app:1.0.0') */
   clientTag?: string;
-  /** Hosting application name */
-  hostingApp?: string;
-  /** Hosting application version */
-  hostingAppVer?: string;
   /** Analytics endpoint URL (default: 'https://analytics.kaltura.com/api_v3/index.php') */
   serviceUrl?: string;
   /** HTTP method (default: 'POST') */
@@ -89,6 +89,16 @@ export declare class KalturaAvatarAnalytics {
     readonly CHANNEL: 2;
     readonly GLOBAL: 3;
   };
+  static readonly HostingApplication: {
+    readonly GENIE: 23;
+    readonly AGENTS: 25;
+    readonly MODELS_SDK: 26;
+    readonly CONVERSATION_MANAGER: 27;
+    readonly AVATAR_VIDEOS: 28;
+    readonly AGENTIC_AVATARS_STUDIO: 29;
+    readonly UNISPHERE_OS: 30;
+    readonly KAI_VENDOR: 31;
+  };
 
   constructor(sdk: any, config: AnalyticsConfig);
 
@@ -107,11 +117,8 @@ export declare class KalturaAvatarAnalytics {
   /** Set context ID for subsequent events */
   setContextId(id: string): void;
 
-  /** Set entry ID for subsequent events */
-  setEntryId(id: string): void;
-
   /** Set context type (1=Entry, 2=Channel, 3=Global) */
-  setContextType(type: number | string): void;
+  setContextType(type: number): void;
 
   /** Set custom metadata key-value for subsequent events */
   setMetadata(key: string, value: string | number): void;

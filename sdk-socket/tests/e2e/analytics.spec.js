@@ -459,26 +459,17 @@ test.describe('KalturaAvatarAnalytics — Unit Tests', () => {
     expect(result.sessionId).toBeTruthy();
   });
 
-  test('genieId auto-read from SDK, overrideable', async () => {
+  test('genieId and agentId auto-read from SDK as fallback params', async () => {
     const result = await page.evaluate(() => {
       const sdk = window.createMockSDK();
-      // Default: reads from sdk.getClientId()
-      const kava1 = new KalturaAvatarAnalytics(sdk, { ks: 'ks1', partnerId: 1 });
-      kava1.pageView('test');
-      const autoGenie = window._fetchCalls[0]?.body.genieId;
-      kava1.destroy();
-
-      window._fetchCalls = [];
-      // Override
-      const kava2 = new KalturaAvatarAnalytics(sdk, { ks: 'ks1', partnerId: 1, genieId: 'custom-genie' });
-      kava2.pageView('test');
-      const overrideGenie = window._fetchCalls[0]?.body.genieId;
-      kava2.destroy();
-
-      return { autoGenie, overrideGenie };
+      const kava = new KalturaAvatarAnalytics(sdk, { ks: 'ks1', partnerId: 1 });
+      kava.pageView('test');
+      const body = window._fetchCalls[0]?.body;
+      kava.destroy();
+      return { genieId: body.genieId, agentId: body.agentId };
     });
-    expect(result.autoGenie).toBe('test-client-123');
-    expect(result.overrideGenie).toBe('custom-genie');
+    expect(result.genieId).toBe('test-client-123');
+    expect(result.agentId).toBe('test-flow-456');
   });
 
   // ────────────────────────────────────────────────────────────────────
@@ -500,20 +491,6 @@ test.describe('KalturaAvatarAnalytics — Unit Tests', () => {
     });
     expect(result.before).toBeFalsy();
     expect(result.after).toBe('3:earnings');
-  });
-
-  test('setEntryId affects subsequent events', async () => {
-    const result = await page.evaluate(() => {
-      const sdk = window.createMockSDK();
-      const kava = new KalturaAvatarAnalytics(sdk, { ks: 'ks1', partnerId: 1 });
-      kava.setEntryId('entry_abc');
-      kava.pageView('test');
-      return new Promise(resolve => setTimeout(() => {
-        kava.destroy();
-        resolve(window._fetchCalls[0]?.body.entryId);
-      }, 50));
-    });
-    expect(result).toBe('entry_abc');
   });
 
   test('setMetadata affects subsequent events', async () => {

@@ -74,8 +74,6 @@ test.describe('Analytics Plugin — Integration with Real SDK', () => {
       const kava = new KalturaAvatarAnalytics(sdk, {
         ks: 'test-ks-token-integration',
         partnerId: 5975432,
-        hostingApp: 'integration-test',
-        hostingAppVer: '1.0.0'
       });
 
       const stats = kava.getStats();
@@ -492,8 +490,6 @@ test.describe('Analytics Plugin — Integration with Real SDK', () => {
       const kava = new KalturaAvatarAnalytics(sdk, {
         ks: 'djJ8NjQ5NjMwMn...',
         partnerId: 5975432,
-        hostingApp: 'demo-app',
-        hostingAppVer: '2.4.7'
       });
 
       // Full lifecycle simulation
@@ -597,7 +593,7 @@ test.describe('Analytics Plugin — Integration with Real SDK', () => {
     expect(result.reactionType.DISLIKE).toBe(2);
   });
 
-  test('genieId and agentId auto-populated from SDK', async () => {
+  test('genieId and agentId auto-populated from SDK as fallback params', async () => {
     const result = await page.evaluate(async () => {
       const sdk = new KalturaAvatarSDK({
         clientId: '115767973963657880005',

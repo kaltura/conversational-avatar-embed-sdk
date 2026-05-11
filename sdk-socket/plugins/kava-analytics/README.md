@@ -23,10 +23,8 @@ Optional analytics plugin for the [Kaltura Avatar SDK (Socket)](../../README.md)
 const sdk = new KalturaAvatarSDK({ clientId: '...', flowId: '...', container: '#avatar' });
 
 const kava = new KalturaAvatarAnalytics(sdk, {
-  ks: 'your-kaltura-session-token',   // Required
-  partnerId: 12345,                    // Required
-  hostingApp: 'my-app',
-  hostingAppVer: '1.0.0'
+  ks: 'your-kaltura-session-token',   // Required — see KS_GUIDE.md
+  partnerId: 12345                     // Required
 });
 
 sdk.connect();
@@ -52,11 +50,7 @@ new KalturaAvatarAnalytics(sdk, {
   partnerId: number,    // Kaltura partner ID
 
   // Optional (defaults shown)
-  agentId: '',          // Auto-read from sdk.getFlowId()
-  genieId: '',          // Auto-read from sdk.getClientId()
   clientTag: '',        // e.g., 'my-app:1.0.0'
-  hostingApp: '',       // Application name for server-side enrichment
-  hostingAppVer: '',    // Application version
   serviceUrl: 'https://analytics.kaltura.com/api_v3/index.php',
   requestMethod: 'POST',
   userId: '',           // User ID for attribution

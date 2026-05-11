@@ -53,8 +53,6 @@ test.describe('Demo App — Analytics Plugin Smoke Test', () => {
       const kava = new KalturaAvatarAnalytics(sdk, {
         ks: 'test-demo-ks',
         partnerId: 5975432,
-        hostingApp: 'demo',
-        hostingAppVer: KalturaAvatarSDK.VERSION
       });
 
       const stats = kava.getStats();
