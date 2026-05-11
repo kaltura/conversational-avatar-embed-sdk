@@ -1550,19 +1550,39 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     expect(result.unique).toBe(true);
   });
 
-  test('new speechId interrupts previous active caption', async () => {
+  test('new speechId on active caption continues without interrupt (same utterance)', async () => {
     const result = await page.evaluate(() => {
       const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
       const emitter = new TypedEventEmitter();
       const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
       let interrupted = false;
+      let starts = 0;
       emitter.on('caption-interrupted', () => { interrupted = true; });
-      cm.onChunk('First response.', 'id-1');
-      cm.onChunk('New response starts.', 'id-2'); // different speechId → interrupt
+      emitter.on('caption-start', () => { starts++; });
+      cm.onChunk('First chunk arrives.', 'id-1');
+      cm.onChunk(' More text under new id.', 'id-2');
       cm.destroy();
-      return interrupted;
+      return { interrupted, starts };
     });
-    expect(result).toBe(true);
+    expect(result.interrupted).toBe(false);
+    expect(result.starts).toBe(1);
+  });
+
+  test('new speechId on empty buffer starts fresh caption', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let starts = 0;
+      emitter.on('caption-start', () => { starts++; });
+      cm.onChunk('First response.', 'id-1');
+      cm.onSpeakingStart();
+      cm.onSpeakingEnd('First response.', 'id-1');
+      cm.onChunk('Second response.', 'id-2');
+      cm.destroy();
+      return starts;
+    });
+    expect(result).toBe(2);
   });
 
   test('caption segments cover full text (no words missing)', async () => {
@@ -1769,6 +1789,113 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     });
     expect(result.length).toBeGreaterThan(0);
     expect(result.join(' ')).toContain('Just one sentence without another');
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // CAPTION ROBUSTNESS — speechId dedup, SSML stripping, fullText handling
+  // ────────────────────────────────────────────────────────────────────
+
+  test('caption: SSML tags stripped from chunks before segmenting', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      const segments = [];
+      emitter.on('caption-segment', (p) => segments.push(p.text));
+      cm.onChunk('Hello <break time="500ms"/> world. How are you?', 's1');
+      cm.onSpeakingStart();
+      cm.onSpeakingEnd('Hello world. How are you?', 's1');
+      cm.destroy();
+      const joined = segments.join(' ');
+      return { joined, hasTag: joined.includes('<'), hasBreak: joined.includes('break') };
+    });
+    expect(result.hasTag).toBe(false);
+    expect(result.hasBreak).toBe(false);
+    expect(result.joined).toContain('Hello');
+    expect(result.joined).toContain('world');
+  });
+
+  test('caption: SSML-only chunk is ignored', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let started = false;
+      emitter.on('caption-start', () => { started = true; });
+      cm.onChunk('<break time="200ms"/>', 's1');
+      cm.destroy();
+      return started;
+    });
+    expect(result).toBe(false);
+  });
+
+  test('caption: multiple speechIds within same utterance accumulate text', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      const segments = [];
+      emitter.on('caption-segment', (p) => segments.push(p.text));
+      cm.onChunk('Hello world. ', 'id-a');
+      cm.onChunk('How are you? ', 'id-b');
+      cm.onChunk('I am fine. ', 'id-c');
+      cm.onSpeakingStart();
+      cm.onSpeakingEnd('Hello world. How are you? I am fine.', 'id-c');
+      cm.destroy();
+      const joined = segments.join(' ');
+      return { joined, segCount: segments.length };
+    });
+    expect(result.segCount).toBeGreaterThanOrEqual(3);
+    expect(result.joined).toContain('Hello world');
+    expect(result.joined).toContain('How are you');
+    expect(result.joined).toContain('I am fine');
+  });
+
+  test('caption: onSpeakingEnd does not produce residual fragments from fullText mismatch', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      const segments = [];
+      emitter.on('caption-segment', (p) => segments.push(p.text));
+      // Chunks arrive with slightly different formatting than fullText
+      cm.onChunk('Hello world. ', 'id-1');
+      cm.onChunk('How are you doing today? ', 'id-1');
+      cm.onSpeakingStart();
+      // fullText from server has different spacing/punctuation (em-dash, no trailing space)
+      cm.onSpeakingEnd('Hello world. How are you doing today?', 'id-1');
+      cm.destroy();
+      const joined = segments.join(' ');
+      // Should NOT contain random fragments like "d?" or "re?" or "y?"
+      const hasFragment = segments.some(s => /^[a-z]{1,2}\??$/.test(s.trim()));
+      return { joined, hasFragment, segments };
+    });
+    expect(result.hasFragment).toBe(false);
+    expect(result.joined).toContain('Hello world');
+    expect(result.joined).toContain('How are you');
+  });
+
+  test('caption: rate calibration uses fullText length for accuracy', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const rateBefore = cm._rate.charsPerSec;
+        // Use a longer text so the observed rate falls within valid range (1-50 chars/sec)
+        const longText = 'This is a fairly long sentence that simulates real avatar speech content. It needs to be realistic.';
+        cm.onChunk(longText.slice(0, 30), 's1');
+        cm.onSpeakingStart();
+        setTimeout(() => {
+          // fullText includes the complete text (more accurate for calibration)
+          cm.onSpeakingEnd(longText, 's1');
+          const rateAfter = cm._rate.charsPerSec;
+          cm.destroy();
+          resolve({ rateBefore, rateAfter, calibrated: rateAfter !== rateBefore });
+        }, 3000);
+      });
+    });
+    expect(result.calibrated).toBe(true);
   });
 
   // ────────────────────────────────────────────────────────────────────

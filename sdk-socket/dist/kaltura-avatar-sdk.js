@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.5.5
+ * @version 2.5.6
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.5.5';
+  const VERSION = '2.5.6';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -767,7 +767,7 @@
 
     apply(text) {
       if (!text) return text;
-      let result = text;
+      let result = text.replace(/<[^>]+>/g, '');
       for (const { re, to } of this._replacements) {
         result = result.replace(re, to);
       }
@@ -1245,19 +1245,26 @@
       if (!this._enabled) return;
       if (!text || !text.trim()) return;
 
+      text = text.replace(/<[^>]+>/g, '');
+      if (!text.trim()) return;
+
       const rid = speechId || this._responseId || this._generateId();
       if (rid !== this._responseId) {
-        if (this._active) this._interrupt();
-        this._responseId = rid;
-        this._textBuffer = '';
-        this._segments = [];
-        this._commitBoundary = 0;
-        this._displayedIndex = -1;
-        this._displayedAt = 0;
-        this._displayedLen = 0;
-        this._speaking = false;
-        this._active = true;
-        this._emitter.emit(Events.CAPTION_START, { responseId: this._responseId });
+        if (this._active && this._textBuffer.length > 0) {
+          this._responseId = rid;
+        } else {
+          if (this._active) this._interrupt();
+          this._responseId = rid;
+          this._textBuffer = '';
+          this._segments = [];
+          this._commitBoundary = 0;
+          this._displayedIndex = -1;
+          this._displayedAt = 0;
+          this._displayedLen = 0;
+          this._speaking = false;
+          this._active = true;
+          this._emitter.emit(Events.CAPTION_START, { responseId: this._responseId });
+        }
       }
 
       this._textBuffer += text;
@@ -1302,8 +1309,7 @@
           this._show(i);
         }
       } else if (this._active) {
-        // Use authoritative full text, commit all remaining
-        if (fullText && fullText.trim()) this._textBuffer = fullText;
+        // Flush remaining uncommitted text from our own buffer
         const tail = this._textBuffer.slice(this._commitBoundary);
         if (tail.trim()) {
           const finalSegs = this._segmenter.segment(tail);
@@ -1315,10 +1321,11 @@
         }
       }
 
-      // Calibrate rate from observed speaking duration
-      if (this._speakingStartTime > 0 && this._textBuffer) {
+      // Calibrate rate from observed speaking duration using authoritative fullText length
+      const calibrationText = (fullText && fullText.trim()) ? fullText : this._textBuffer;
+      if (this._speakingStartTime > 0 && calibrationText) {
         const duration = Date.now() - this._speakingStartTime;
-        this._rate.calibrate(this._textBuffer.length, duration);
+        this._rate.calibrate(calibrationText.length, duration);
       }
 
       if (this._active) {

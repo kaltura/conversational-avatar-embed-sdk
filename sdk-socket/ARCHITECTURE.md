@@ -216,8 +216,10 @@ debug_stvTaskGenerated { text, speechId }   ← text chunks arrive BEFORE audio
        │
        ▼
 CaptionManager.onChunk(delta, speechId)
-  • _textBuffer += delta
-  • If new speechId: emit 'caption-start', interrupt previous
+  • Strip SSML tags (<break>, etc.) from delta
+  • _textBuffer += cleaned delta
+  • If new speechId AND buffer is empty: emit 'caption-start' (new response)
+  • If new speechId AND buffer has content: continue (same utterance, server rotated ID)
   • _appendNewSegments(): commit text up to last sentence boundary
     (segments are APPEND-ONLY — never rebuilt or mutated)
 
@@ -249,9 +251,9 @@ stvFinishedTalking { agentContent }         ← audio ends
        ▼
 CaptionManager.onSpeakingEnd(fullText)
   • Stop tick
-  • Commit ALL remaining uncommitted text (flush)
+  • Flush remaining uncommitted text from own buffer (NOT replaced by fullText)
   • Show all unseen segments immediately
-  • Calibrate rate: actualDuration / totalChars → chars/sec (EMA α=0.3)
+  • Calibrate rate using fullText length (authoritative) / actualDuration → EMA α=0.3
   • Emit 'caption-end'
   • Hold last segment visible (default 2s), then fade out
 
@@ -267,6 +269,9 @@ CaptionManager.interrupt()
 **Key design decisions:**
 - **Append-only segments:** `_segments[]` is never rebuilt. Once a segment is committed it never changes. This eliminates display-index drift that caused skipped content.
 - **Commit boundary:** `_commitBoundary` tracks how many chars of `_textBuffer` have been consumed into segments. Only text up to the last sentence boundary is committed (incomplete trailing text waits for more chunks).
+- **SpeechId continuity:** The server may rotate speechId mid-utterance (observed: 3 IDs per single greeting). If `onChunk` sees a new speechId but the buffer already has content, it continues accumulating (same utterance). Only an empty buffer signals a truly new response.
+- **No fullText buffer replacement:** `onSpeakingEnd(fullText)` does NOT overwrite `_textBuffer` with `fullText`. The fullText from `stvFinishedTalking` often differs slightly (newlines, em-dashes, spacing) which would misalign `_commitBoundary` and produce residual fragments. Instead, fullText is used only for rate calibration (authoritative char count).
+- **SSML stripping:** `<break>`, `<prosody>`, and other TTS markup tags are stripped from chunks in `onChunk` and again in `CaptionFilter.apply()` before display. An SSML-only chunk is silently dropped.
 - **Delta accumulation:** The socket handler detects whether the server sends cumulative or delta text and accumulates `_beforeBuffer` correctly in both modes.
 - Text arrives BEFORE audio → chunks buffer silently until speaking starts
 - First segment only shown when it ends at a natural boundary (sentence punctuation or segmenter split)
