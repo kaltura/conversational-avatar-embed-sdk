@@ -414,7 +414,7 @@
     _handleCallEnded(useBeacon) {
       if (this._destroyed || !this._callActive) return;
       this._callActive = false;
-      const duration = this._session.getCallDuration();
+      const duration = (this._sdk.getSessionDuration && this._sdk.getSessionDuration()) || this._session.getCallDuration();
       const params = this._builder.callEnded(duration);
       if (useBeacon) {
         this._dispatchBeacon(params);
@@ -551,7 +551,7 @@
         eventsSent: this._stats.eventsSent,
         errors: this._stats.errors,
         messageCount: this._stats.messageCount,
-        callDuration: this._session.getCallDuration(),
+        callDuration: (this._sdk.getSessionDuration && this._sdk.getSessionDuration()) || this._session.getCallDuration(),
         threadId: this._session.threadId,
         sessionId: this._session.sessionId
       };
@@ -566,7 +566,7 @@
 
       if (this._callActive) {
         this._callActive = false;
-        const duration = this._session.getCallDuration();
+        const duration = (this._sdk.getSessionDuration && this._sdk.getSessionDuration()) || this._session.getCallDuration();
         const params = this._builder.callEnded(duration);
         this._dispatch(params);
       }

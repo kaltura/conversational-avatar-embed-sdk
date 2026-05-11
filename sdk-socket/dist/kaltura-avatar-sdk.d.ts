@@ -563,6 +563,12 @@ export declare class KalturaAvatarSDK {
   isAvatarSpeaking(): boolean;
   isUserSpeaking(): boolean;
 
+  // ── Session Timing ──
+  /** Seconds elapsed since conversation started (since 'ready' event). Returns 0 if not yet in conversation. */
+  getSessionDuration(): number;
+  /** Seconds remaining before server terminates the session, or null if no time-warning received yet. */
+  getTimeRemaining(): number | null;
+
   // ── Server Info ──
   /** Full server configuration object (available after 'configured' event) */
   getServerInfo(): ServerInfo;

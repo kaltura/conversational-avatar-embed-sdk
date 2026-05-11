@@ -735,10 +735,36 @@ sdk.isInConversation();  // true/false
 sdk.isQueued();          // true if waiting in server queue
 sdk.isAvatarSpeaking();  // true while avatar is talking
 sdk.isUserSpeaking();    // true while user is talking (server VAD)
+sdk.getSessionDuration(); // seconds elapsed since conversation started (0 if not started)
+sdk.getTimeRemaining();  // seconds until server terminates (null until time-warning arrives)
 sdk.getSessionId();      // WebRTC session ID (for debugging)
 sdk.getVideoElement();   // The <video> DOM element
 sdk.getMicStream();      // The MediaStream from getUserMedia
 ```
+
+### Session Timing
+
+The server controls session duration and sends warnings before termination:
+
+```javascript
+// React to server time warnings
+sdk.on('time-warning', ({ remainingSeconds }) => {
+  showCountdown(remainingSeconds);  // e.g., "60 seconds remaining"
+});
+
+sdk.on('time-expired', () => {
+  showSessionEndedUI();  // server has terminated the session
+});
+
+// Poll-friendly: check remaining time and elapsed duration at any point
+setInterval(() => {
+  const elapsed = sdk.getSessionDuration();    // seconds since 'ready'
+  const remaining = sdk.getTimeRemaining();    // null until warning, then seconds
+  updateTimerDisplay(elapsed, remaining);
+}, 1000);
+```
+
+**Important:** `getTimeRemaining()` returns `null` until the server sends its first `time-warning`. The server decides when to warn (typically 60s before end). There is no way to know the total session budget at connect time — only elapsed time and server-provided remaining time are available.
 
 ---
 

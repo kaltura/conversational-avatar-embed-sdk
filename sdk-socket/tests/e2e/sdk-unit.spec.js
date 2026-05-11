@@ -2167,4 +2167,66 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     // But the error code for handshake timeout is available.
     expect(result).toBeTruthy();
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // SESSION TIMING
+  // ────────────────────────────────────────────────────────────────────
+
+  test('getSessionDuration returns 0 before conversation starts', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: 'test', flowId: 'f', container: '#test-container' });
+      const duration = sdk.getSessionDuration();
+      sdk.destroy();
+      return duration;
+    });
+    expect(result).toBe(0);
+  });
+
+  test('getSessionDuration returns elapsed seconds after ready', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const sdk = new KalturaAvatarSDK({ clientId: 'test', flowId: 'f', container: '#test-container' });
+        // Simulate the conversation started
+        sdk._conversationStartedAt = Date.now() - 5000;
+        const duration = sdk.getSessionDuration();
+        sdk.destroy();
+        resolve(duration);
+      });
+    });
+    expect(result).toBeGreaterThanOrEqual(4);
+    expect(result).toBeLessThanOrEqual(6);
+  });
+
+  test('getTimeRemaining returns null before warning received', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: 'test', flowId: 'f', container: '#test-container' });
+      const remaining = sdk.getTimeRemaining();
+      sdk.destroy();
+      return remaining;
+    });
+    expect(result).toBeNull();
+  });
+
+  test('getTimeRemaining reflects time-warning event payload', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: 'test', flowId: 'f', container: '#test-container' });
+      // Simulate server sending time warning
+      sdk._timeRemaining = 60;
+      const remaining = sdk.getTimeRemaining();
+      sdk.destroy();
+      return remaining;
+    });
+    expect(result).toBe(60);
+  });
+
+  test('getTimeRemaining is 0 after time-expired', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: 'test', flowId: 'f', container: '#test-container' });
+      sdk._timeRemaining = 0;
+      const remaining = sdk.getTimeRemaining();
+      sdk.destroy();
+      return remaining;
+    });
+    expect(result).toBe(0);
+  });
 });

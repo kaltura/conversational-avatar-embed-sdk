@@ -407,6 +407,35 @@ uninitialized → connecting → connected → joining → joined → in-convers
 
 Valid transitions are enforced. Invalid transitions throw `AvatarError(INVALID_STATE)`.
 
+## Session Timing
+
+The server controls session duration; the SDK surfaces server-provided signals:
+
+```
+ready (in-conversation)               conversationTimeWarning         conversationTimeExpired
+       │                                        │                              │
+       ▼                                        ▼                              ▼
+_conversationStartedAt = Date.now()    _timeRemaining = N (seconds)    _timeRemaining = 0
+                                       emit TIME_WARNING               emit TIME_EXPIRED → ENDED
+```
+
+**Key principles:**
+- **Server is authoritative** — the server decides when to warn and when to terminate
+- **No total time at connect** — `clientConfiguration` does not include a session time budget
+- **`getSessionDuration()`** — client-side elapsed seconds since `ready` (not server-authoritative, but useful for UI)
+- **`getTimeRemaining()`** — returns `null` until first `time-warning` from server, then the exact seconds remaining
+- **KAVA plugin** uses `sdk.getSessionDuration()` for `totalCallTime` in `callEnded` events rather than maintaining its own timer
+
+**App usage pattern:**
+```javascript
+sdk.on('time-warning', ({ remainingSeconds }) => {
+  showCountdown(remainingSeconds);
+  // remainingSeconds ticks down server-side; poll via getTimeRemaining() if needed
+});
+sdk.on('time-expired', () => showSessionEndedUI());
+// For elapsed display: sdk.getSessionDuration() at any time after 'ready'
+```
+
 ---
 
 ## WebRTC Architecture

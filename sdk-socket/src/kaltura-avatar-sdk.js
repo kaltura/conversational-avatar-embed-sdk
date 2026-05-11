@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.5.6
+ * @version 2.5.7
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.5.6';
+  const VERSION = '2.5.7';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -2924,6 +2924,8 @@
       this._avatarSpeaking = false;
       this._userSpeaking = false;
       this._intentionalDisconnect = false;
+      this._conversationStartedAt = 0;
+      this._timeRemaining = null;
 
       this._setupContainer();
     }
@@ -3161,6 +3163,15 @@
     isQueued() { return this._queue.active; }
     isAvatarSpeaking() { return this._avatarSpeaking; }
     isUserSpeaking() { return this._userSpeaking; }
+
+    /** Seconds elapsed since conversation started (since 'ready' event). Returns 0 if not in conversation. */
+    getSessionDuration() {
+      if (!this._conversationStartedAt) return 0;
+      return Math.round((Date.now() - this._conversationStartedAt) / 1000);
+    }
+
+    /** Seconds remaining before server terminates, or null if no warning received yet. */
+    getTimeRemaining() { return this._timeRemaining; }
 
     /** Server-provided configuration and metadata */
     getServerInfo() { return this._serverInfo; }
@@ -3538,6 +3549,7 @@
 
         this._socket.on('conversationTimeExpired', () => {
           this._log.warn('Conversation time expired');
+          this._timeRemaining = 0;
           this._emitter.emit(Events.TIME_EXPIRED);
           this._emitter.emit(Events.ERROR, new AvatarError(ErrorCode.CONVERSATION_TIME_EXPIRED, 'Session time limit reached', { recoverable: false }));
           this._state.transition(State.ENDED);
@@ -3545,8 +3557,10 @@
         });
 
         this._socket.on('conversationTimeWarning', (data) => {
-          this._log.warn('Time warning', data?.remainingTime);
-          this._emitter.emit(Events.TIME_WARNING, { remainingSeconds: data?.remainingTime || 0 });
+          const remaining = data?.remainingTime || 0;
+          this._timeRemaining = remaining;
+          this._log.warn('Time warning', remaining);
+          this._emitter.emit(Events.TIME_WARNING, { remainingSeconds: remaining });
         });
 
         this._socket.on('flowConfigError', (data) => {
@@ -3723,6 +3737,7 @@
         this._permissionsApproved = true;
         this._socket.emit('approvedPermissions', {});
         this._log.info('Permissions approved — avatar will greet');
+        this._conversationStartedAt = Date.now();
         this._state.transition(State.IN_CONVERSATION);
         this._emitter.emit(Events.READY);
         this._reconnect.reset();
