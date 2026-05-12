@@ -64,6 +64,7 @@ test.describe('KalturaAvatarAnalytics — Unit Tests', () => {
           getClientId() { return 'test-client-123'; },
           getFlowId() { return 'test-flow-456'; },
           getSessionId() { return 'session-abc'; },
+          getSessionDuration() { return 5; },
           _listeners: listeners
         };
       };
@@ -651,5 +652,161 @@ test.describe('KalturaAvatarAnalytics — Unit Tests', () => {
              Object.isFrozen(KalturaAvatarAnalytics.ReactionType);
     });
     expect(result).toBe(true);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // ERROR REPORTING
+  // ────────────────────────────────────────────────────────────────────
+
+  test('SDK error is captured and included in callEnded', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise(resolve => {
+        const sdk = window.createMockSDK();
+        const kava = new KalturaAvatarAnalytics(sdk, { ks: 'ks1', partnerId: 1 });
+        sdk.emit('ready');
+        sdk.emit('error', { code: 2001, message: 'Mic permission denied' });
+        sdk.emit('disconnected');
+        setTimeout(() => {
+          const callEnded = window._fetchCalls.find(c => c.body && c.body.eventType === '80003');
+          resolve({
+            errorCode: callEnded ? callEnded.body.errorCode : null,
+            errorMessage: callEnded ? callEnded.body.errorMessage : null,
+            errorPosition: callEnded ? callEnded.body.errorPosition : null
+          });
+        }, 50);
+      });
+    });
+    expect(result.errorCode).toBe('2001');
+    expect(result.errorMessage).toBe('Mic permission denied');
+    expect(result.errorPosition).toBe('2');
+  });
+
+  test('SDK error before call started has PRE_CALL position', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise(resolve => {
+        const sdk = window.createMockSDK();
+        const kava = new KalturaAvatarAnalytics(sdk, { ks: 'ks1', partnerId: 1 });
+        sdk.emit('error', { code: 1001, message: 'Connection failed' });
+        sdk.emit('ready');
+        sdk.emit('disconnected');
+        setTimeout(() => {
+          const callEnded = window._fetchCalls.find(c => c.body && c.body.eventType === '80003');
+          resolve({
+            errorPosition: callEnded ? callEnded.body.errorPosition : null
+          });
+        }, 50);
+      });
+    });
+    expect(result.errorPosition).toBe('1');
+  });
+
+  test('callEnded without error has no errorCode field', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise(resolve => {
+        const sdk = window.createMockSDK();
+        const kava = new KalturaAvatarAnalytics(sdk, { ks: 'ks1', partnerId: 1 });
+        sdk.emit('ready');
+        sdk.emit('disconnected');
+        setTimeout(() => {
+          const callEnded = window._fetchCalls.find(c => c.body && c.body.eventType === '80003');
+          resolve({
+            hasErrorCode: callEnded ? ('errorCode' in callEnded.body) : false
+          });
+        }, 50);
+      });
+    });
+    expect(result.hasErrorCode).toBe(false);
+  });
+
+  test('getStats reflects errors and transportErrors separately', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise(resolve => {
+        const sdk = window.createMockSDK();
+        const kava = new KalturaAvatarAnalytics(sdk, { ks: 'ks1', partnerId: 1 });
+        sdk.emit('error', { code: 1003, message: 'Connection lost' });
+        sdk.emit('error', { code: 2003, message: 'WHEP failed' });
+        const stats = kava.getStats();
+        resolve({
+          errors: stats.errors,
+          transportErrors: stats.transportErrors,
+          lastError: stats.lastError
+        });
+      });
+    });
+    expect(result.errors).toBe(2);
+    expect(result.transportErrors).toBe(0);
+    expect(result.lastError.code).toBe(2003);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // RESILIENCE — plugin never blocks SDK or app
+  // ────────────────────────────────────────────────────────────────────
+
+  test('throwing tamperHandler does not crash plugin', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise(resolve => {
+        const sdk = window.createMockSDK();
+        const kava = new KalturaAvatarAnalytics(sdk, {
+          ks: 'ks1',
+          partnerId: 1,
+          tamperHandler: () => { throw new Error('App bug!'); }
+        });
+        sdk.emit('ready');
+        sdk.emit('avatar-speech', { text: 'Hello' });
+        setTimeout(() => {
+          resolve({ eventsSent: kava.getStats().eventsSent, alive: true });
+        }, 50);
+      });
+    });
+    expect(result.alive).toBe(true);
+    expect(result.eventsSent).toBeGreaterThan(0);
+  });
+
+  test('plugin handler error does not propagate to SDK', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise(resolve => {
+        const sdk = window.createMockSDK();
+        const kava = new KalturaAvatarAnalytics(sdk, { ks: 'ks1', partnerId: 1 });
+
+        // Sabotage an internal method to simulate plugin bug
+        kava._handleAvatarSpeech = () => { throw new Error('Internal plugin crash'); };
+
+        let sdkCrashed = false;
+        try {
+          sdk.emit('avatar-speech', { text: 'Test' });
+        } catch (e) {
+          sdkCrashed = true;
+        }
+        resolve({ sdkCrashed });
+      });
+    });
+    expect(result.sdkCrashed).toBe(false);
+  });
+
+  test('fetch failure increments transportErrors not errors', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise(resolve => {
+        const savedFetch = window.fetch;
+        window.fetch = () => Promise.reject(new Error('Network down'));
+        const sdk = window.createMockSDK();
+        const kava = new KalturaAvatarAnalytics(sdk, { ks: 'ks1', partnerId: 1 });
+        sdk.emit('ready');
+        setTimeout(() => {
+          window.fetch = savedFetch;
+          const stats = kava.getStats();
+          resolve({ transportErrors: stats.transportErrors, errors: stats.errors });
+        }, 50);
+      });
+    });
+    expect(result.transportErrors).toBeGreaterThan(0);
+    expect(result.errors).toBe(0);
+  });
+
+  test('ErrorPosition enum is exposed', async () => {
+    const result = await page.evaluate(() => {
+      return KalturaAvatarAnalytics.ErrorPosition;
+    });
+    expect(result.PRE_CALL).toBe(1);
+    expect(result.MID_CALL).toBe(2);
   });
 });

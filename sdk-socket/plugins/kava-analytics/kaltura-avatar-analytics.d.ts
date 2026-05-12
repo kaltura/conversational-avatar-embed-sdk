@@ -41,8 +41,10 @@ export interface AnalyticsConfig {
 export interface AnalyticsStats {
   eventsSent: number;
   errors: number;
+  transportErrors: number;
   messageCount: number;
   callDuration: number;
+  lastError: { code: number; message: string } | null;
   threadId: string;
   sessionId: string;
 }
@@ -88,6 +90,10 @@ export declare class KalturaAvatarAnalytics {
     readonly ENTRY: 1;
     readonly CHANNEL: 2;
     readonly GLOBAL: 3;
+  };
+  static readonly ErrorPosition: {
+    readonly PRE_CALL: 1;
+    readonly MID_CALL: 2;
   };
   static readonly HostingApplication: {
     readonly GENIE: 23;

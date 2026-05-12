@@ -55,6 +55,11 @@
     GLOBAL: 3
   });
 
+  const ErrorPosition = Object.freeze({
+    PRE_CALL: 1,
+    MID_CALL: 2
+  });
+
   const HostingApplication = Object.freeze({
     GENIE: 23,
     AGENTS: 25,
@@ -329,7 +334,9 @@
       this._sdk = sdk;
       this._destroyed = false;
       this._callActive = false;
-      this._stats = { eventsSent: 0, errors: 0, messageCount: 0 };
+      this._lastError = null;
+      this._lastErrorPosition = null;
+      this._stats = { eventsSent: 0, errors: 0, transportErrors: 0, messageCount: 0 };
 
       this._config = {
         ks: config.ks,
@@ -373,20 +380,29 @@
       const sdk = this._sdk;
 
       if (this._config.autoStart) {
-        this._unsubscribers.push(sdk.on('ready', () => this._handleCallStarted()));
+        this._unsubscribers.push(sdk.on('ready', () => this._safeHandle('_handleCallStarted')));
       }
 
       if (this._config.autoEnd) {
-        this._unsubscribers.push(sdk.on('disconnected', () => this._handleCallEnded(false)));
-        this._unsubscribers.push(sdk.on('destroyed', () => this._handleCallEnded(false)));
+        this._unsubscribers.push(sdk.on('disconnected', () => this._safeHandle('_handleCallEnded', false)));
+        this._unsubscribers.push(sdk.on('destroyed', () => this._safeHandle('_handleCallEnded', false)));
       }
 
       if (this._config.autoMessages) {
-        this._unsubscribers.push(sdk.on('avatar-speech', (data) => this._handleAvatarSpeech(data)));
-        this._unsubscribers.push(sdk.on('user-speech', (data) => this._handleUserSpeech(data)));
+        this._unsubscribers.push(sdk.on('avatar-speech', (data) => this._safeHandle('_handleAvatarSpeech', data)));
+        this._unsubscribers.push(sdk.on('user-speech', (data) => this._safeHandle('_handleUserSpeech', data)));
       }
 
-      this._unsubscribers.push(sdk.on('reconnected', () => this._handleReconnect()));
+      this._unsubscribers.push(sdk.on('error', (err) => this._safeHandle('_handleSDKError', err)));
+      this._unsubscribers.push(sdk.on('reconnected', () => this._safeHandle('_handleReconnect')));
+    }
+
+    _safeHandle(method, arg) {
+      try { this[method](arg); }
+      catch (e) {
+        this._stats.errors++;
+        if (this._config.debug) console.warn('[KavaAnalytics] handler error:', method, e);
+      }
     }
 
     _bindUnload() {
@@ -416,6 +432,11 @@
       this._callActive = false;
       const duration = (this._sdk.getSessionDuration && this._sdk.getSessionDuration()) || this._session.getCallDuration();
       const params = this._builder.callEnded(duration);
+      if (this._lastError) {
+        params.errorCode = this._lastError.code || 0;
+        params.errorMessage = truncate(this._lastError.message || '', Defaults.MAX_TEXT_LENGTH);
+        params.errorPosition = this._lastErrorPosition || ErrorPosition.MID_CALL;
+      }
       if (useBeacon) {
         this._dispatchBeacon(params);
       } else {
@@ -450,8 +471,20 @@
         this._dispatch(params);
       }
       this._callActive = false;
+      this._lastError = null;
+      this._lastErrorPosition = null;
       this._session.resetForReconnect();
       this._handleCallStarted();
+    }
+
+    _handleSDKError(err) {
+      if (this._destroyed) return;
+      this._lastError = err;
+      this._lastErrorPosition = this._callActive ? ErrorPosition.MID_CALL : ErrorPosition.PRE_CALL;
+      this._stats.errors++;
+      if (this._config.debug) {
+        console.debug('[KavaAnalytics] SDK error captured:', err && err.code, err && err.message);
+      }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -460,8 +493,12 @@
 
     _dispatch(params) {
       if (this._config.tamperHandler) {
-        const shouldSend = this._config.tamperHandler(params);
-        if (shouldSend === false) return;
+        try {
+          const shouldSend = this._config.tamperHandler(params);
+          if (shouldSend === false) return;
+        } catch (e) {
+          if (this._config.debug) console.warn('[KavaAnalytics] tamperHandler threw:', e);
+        }
       }
 
       this._session.incrementIndex();
@@ -470,15 +507,19 @@
         this._stats.eventsSent++;
         this._emitter.emit('sent', { eventType: params.eventType, params });
       }).catch((err) => {
-        this._stats.errors++;
+        this._stats.transportErrors++;
         this._emitter.emit('error', { eventType: params.eventType, error: err });
       });
     }
 
     _dispatchBeacon(params) {
       if (this._config.tamperHandler) {
-        const shouldSend = this._config.tamperHandler(params);
-        if (shouldSend === false) return;
+        try {
+          const shouldSend = this._config.tamperHandler(params);
+          if (shouldSend === false) return;
+        } catch (e) {
+          if (this._config.debug) console.warn('[KavaAnalytics] tamperHandler threw:', e);
+        }
       }
 
       this._session.incrementIndex();
@@ -488,7 +529,7 @@
         this._stats.eventsSent++;
         this._emitter.emit('sent', { eventType: params.eventType, params });
       } else {
-        this._stats.errors++;
+        this._stats.transportErrors++;
         this._emitter.emit('error', { eventType: params.eventType, error: new Error('sendBeacon failed') });
       }
     }
@@ -550,8 +591,10 @@
       return {
         eventsSent: this._stats.eventsSent,
         errors: this._stats.errors,
+        transportErrors: this._stats.transportErrors,
         messageCount: this._stats.messageCount,
         callDuration: (this._sdk.getSessionDuration && this._sdk.getSessionDuration()) || this._session.getCallDuration(),
+        lastError: this._lastError ? { code: this._lastError.code, message: this._lastError.message } : null,
         threadId: this._session.threadId,
         sessionId: this._session.sessionId
       };
@@ -568,6 +611,11 @@
         this._callActive = false;
         const duration = (this._sdk.getSessionDuration && this._sdk.getSessionDuration()) || this._session.getCallDuration();
         const params = this._builder.callEnded(duration);
+        if (this._lastError) {
+          params.errorCode = this._lastError.code || 0;
+          params.errorMessage = truncate(this._lastError.message || '', Defaults.MAX_TEXT_LENGTH);
+          params.errorPosition = this._lastErrorPosition || ErrorPosition.MID_CALL;
+        }
         this._dispatch(params);
       }
 
@@ -594,6 +642,7 @@
   KalturaAvatarAnalytics.ResponseType = ResponseType;
   KalturaAvatarAnalytics.ReactionType = ReactionType;
   KalturaAvatarAnalytics.ContextType = ContextType;
+  KalturaAvatarAnalytics.ErrorPosition = ErrorPosition;
   KalturaAvatarAnalytics.HostingApplication = HostingApplication;
 
   return KalturaAvatarAnalytics;
