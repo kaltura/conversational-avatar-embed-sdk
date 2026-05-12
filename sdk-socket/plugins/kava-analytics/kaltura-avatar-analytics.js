@@ -540,27 +540,32 @@
 
     sendFeedback(messageId, reaction) {
       if (this._destroyed) return;
+      if (!messageId) return;
+      if (reaction !== 'like' && reaction !== 'dislike') return;
       const reactionCode = reaction === 'like' ? ReactionType.LIKE : ReactionType.DISLIKE;
-      const params = this._builder.messageFeedback(messageId, reactionCode);
+      const params = this._builder.messageFeedback(String(messageId), reactionCode);
       this._dispatch(params);
     }
 
     pageView(pageName, pageType) {
       if (this._destroyed) return;
+      if (!pageName) return;
       const params = this._builder.pageLoad(pageName, pageType);
       this._dispatch(params);
     }
 
-    buttonClick(name, value, context) {
+    buttonClick(name, type, value) {
       if (this._destroyed) return;
-      const params = this._builder.buttonClicked(name, context, value);
+      if (!name) return;
+      const params = this._builder.buttonClicked(name, type, value);
       this._dispatch(params);
     }
 
     customEvent(eventType, extraFields) {
       if (this._destroyed) return;
+      if (!eventType || typeof eventType !== 'number') return;
       const params = this._builder._commonParams(eventType);
-      if (extraFields) {
+      if (extraFields && typeof extraFields === 'object') {
         for (const [key, val] of Object.entries(extraFields)) {
           params[key] = val;
         }

@@ -1227,7 +1227,7 @@ Optional extensions live in `plugins/`:
 
 | Plugin | Description | Size |
 |--------|-------------|------|
-| [KAVA Analytics](plugins/kava-analytics/README.md) | Reports Immersive Agent events + standard KAVA events to Kaltura analytics | ~24KB |
+| [KAVA Analytics](plugins/kava-analytics/README.md) | Reports Immersive Agent events + standard KAVA events to Kaltura analytics | ~26KB |
 
 ```html
 <script src="https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-socket/plugins/kava-analytics/kaltura-avatar-analytics.js"></script>
@@ -1236,7 +1236,17 @@ Optional extensions live in `plugins/`:
 ```javascript
 const kava = new KalturaAvatarAnalytics(sdk, { ks: 'your-ks', partnerId: 12345 });
 // Auto-reports: callStarted, callEnded, messageResponse
+
+// Observe outgoing events
+kava.on('sent', ({ eventType, params }) => console.log('KAVA:', eventType));
+
+// Manual events
+kava.pageView('my-page', 'view');
+kava.buttonClick('cta-button', 'Open', 'submit');
+kava.sendFeedback(messageId, 'like');
 ```
+
+The demo app (`examples/demo/`) includes a KAVA toggle — enable it with your Partner ID to see live analytics in the event log. See the [plugin README](plugins/kava-analytics/README.md) for full API, configuration, and how to verify events landed in Kaltura reports.
 
 ---
 

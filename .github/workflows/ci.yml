@@ -93,9 +93,9 @@ jobs:
             node -e "JSON.parse(require('fs').readFileSync('$f', 'utf8'))" || exit 1
           done
 
-      - name: Check Analytics Plugin file size (must be <25KB)
+      - name: Check Analytics Plugin file size (must be <27KB)
         run: |
-          MAX_SIZE=25600
+          MAX_SIZE=27648
           SIZE=$(wc -c < sdk-socket/plugins/kava-analytics/kaltura-avatar-analytics.js)
           echo "Analytics Plugin: ${SIZE} bytes"
           if [ "$SIZE" -gt "$MAX_SIZE" ]; then

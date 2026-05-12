@@ -9,6 +9,8 @@
     <!-- SDK: use relative path for local dev, or the CDN URL in production:
          https://cdn.jsdelivr.net/gh/kaltura/conversational-avatar-embed-sdk@latest/sdk-socket/dist/kaltura-avatar-sdk.js -->
     <script src="../../dist/kaltura-avatar-sdk.js"></script>
+    <!-- Analytics plugin (optional) -->
+    <script src="../../plugins/kava-analytics/kaltura-avatar-analytics.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d18; color: #e0e0e8; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -97,6 +99,9 @@
     <label>Flow ID:</label>
     <input type="text" id="cfg-flow-id" value="agent-1" placeholder="Flow ID">
     <label><input type="checkbox" id="cfg-captions" checked> Captions</label>
+    <label><input type="checkbox" id="cfg-kava"> KAVA</label>
+    <label style="display:none" id="lbl-partner">PID:</label>
+    <input type="text" id="cfg-partner-id" value="" placeholder="Partner ID" style="width:90px;display:none">
     <button class="btn-connect" id="btn-connect" onclick="doConnect()">Connect</button>
     <button class="btn-disconnect" id="btn-disconnect" onclick="doDisconnect()" disabled>Disconnect</button>
 </div>
@@ -153,29 +158,43 @@
 
 <script>
 // ── Demo Application ──
+// Uses an IIFE to avoid polluting the global scope.
+// Only `sdk` is exposed for DevTools inspection — analytics state is encapsulated.
 
-let sdk = null;
+(function() {
+'use strict';
 
-document.getElementById('version-badge').textContent = `v${KalturaAvatarSDK.VERSION}`;
+var sdk = null;
+var analytics = null;
 
-// Text input keyboard shortcut
-document.getElementById('text-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') doSendText();
+document.getElementById('version-badge').textContent = 'v' + KalturaAvatarSDK.VERSION;
+
+// KAVA checkbox toggles partner ID field visibility
+document.getElementById('cfg-kava').addEventListener('change', function() {
+    var show = this.checked ? '' : 'none';
+    document.getElementById('lbl-partner').style.display = show;
+    document.getElementById('cfg-partner-id').style.display = show;
 });
 
-function doConnect() {
-    const clientId = document.getElementById('cfg-client-id').value.trim();
-    const flowId = document.getElementById('cfg-flow-id').value.trim();
+// Text input keyboard shortcut
+document.getElementById('text-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') sendText();
+});
+
+function connect() {
+    var clientId = document.getElementById('cfg-client-id').value.trim();
+    var flowId = document.getElementById('cfg-flow-id').value.trim();
 
     if (!clientId || !flowId) { alert('Client ID and Flow ID are required'); return; }
 
     if (sdk) sdk.destroy();
+    if (analytics) { analytics.destroy(); analytics = null; }
 
-    const captionsEnabled = document.getElementById('cfg-captions').checked;
+    var captionsEnabled = document.getElementById('cfg-captions').checked;
 
     sdk = new KalturaAvatarSDK({
-        clientId,
-        flowId,
+        clientId: clientId,
+        flowId: flowId,
         container: '#avatar-container',
         debug: true,
         media: { ariaLabel: 'Demo Avatar' },
@@ -183,128 +202,161 @@ function doConnect() {
     });
 
     // Register demo commands
-    sdk.registerCommand('end-session', 'ending call now', (match) => {
-        logEvent('command', `[${match.timing}] "${match.command}" in "${match.text.substring(0, 50)}"`);
-        doDisconnect();
+    sdk.registerCommand('end-session', 'ending call now', function(match) {
+        logEvent('command', '[' + match.timing + '] "' + match.command + '" in "' + match.text.substring(0, 50) + '"');
+        disconnect();
     });
-    sdk.registerCommand('navigate', /navigating to slide/i, (match) => {
-        logEvent('command', `[${match.timing}] "${match.command}" — instant reaction before speech finishes`);
+    sdk.registerCommand('navigate', /navigating to slide/i, function(match) {
+        logEvent('command', '[' + match.timing + '] "' + match.command + '" — instant reaction before speech finishes');
     }, { timing: 'before' });
     updateCommandList();
 
     // Wire up events
-    sdk.on('*', (event, payload) => {
-        logEvent('event', `${event}`, payload);
+    sdk.on('*', function(event, payload) {
+        logEvent('event', event, payload);
     });
 
-    sdk.on(KalturaAvatarSDK.Events.READY, () => {
+    sdk.on(KalturaAvatarSDK.Events.READY, function() {
         updateUI('connected');
         logEvent('lifecycle', 'Avatar ready — in conversation');
     });
 
-    sdk.on(KalturaAvatarSDK.Events.AVATAR_SPEECH, ({ text }) => {
-        addBubble('avatar', text);
+    sdk.on(KalturaAvatarSDK.Events.AVATAR_SPEECH, function(data) {
+        addBubble('avatar', data.text);
     });
 
-    sdk.on(KalturaAvatarSDK.Events.USER_SPEECH, ({ text, isFinal }) => {
-        if (!isFinal) return;
+    sdk.on(KalturaAvatarSDK.Events.USER_SPEECH, function(data) {
+        if (!data.isFinal) return;
         document.getElementById('vad-indicator').style.display = 'none';
-        addBubble('user', text);
+        addBubble('user', data.text);
     });
 
-    sdk.on(KalturaAvatarSDK.Events.USER_SPEAKING_START, () => {
+    sdk.on(KalturaAvatarSDK.Events.USER_SPEAKING_START, function() {
         document.getElementById('vad-indicator').style.display = '';
         logEvent('vad', 'User started speaking');
     });
 
-    sdk.on(KalturaAvatarSDK.Events.DISCONNECTED, () => {
+    sdk.on(KalturaAvatarSDK.Events.DISCONNECTED, function() {
         updateUI('disconnected');
     });
 
-    sdk.on(KalturaAvatarSDK.Events.ERROR, (err) => {
-        logEvent('error', `${err.code}: ${err.message}`);
+    sdk.on(KalturaAvatarSDK.Events.ERROR, function(err) {
+        logEvent('error', err.code + ': ' + err.message);
     });
 
-    sdk.on(KalturaAvatarSDK.Events.GENUI, ({ type, data }) => {
-        logEvent('genui', `${type}: ${JSON.stringify(data)}`);
-        addServerEvent(type, data);
+    sdk.on(KalturaAvatarSDK.Events.GENUI, function(data) {
+        logEvent('genui', data.type + ': ' + JSON.stringify(data.data));
+        addServerEvent(data.type, data.data);
     });
 
-    sdk.on(KalturaAvatarSDK.Events.GENUI_RENDERED, ({ type, category }) => {
-        logEvent('genui', `Rendered: ${type} (${category})`);
+    sdk.on(KalturaAvatarSDK.Events.GENUI_RENDERED, function(data) {
+        logEvent('genui', 'Rendered: ' + data.type + ' (' + data.category + ')');
     });
 
-    sdk.on(KalturaAvatarSDK.Events.GENUI_INTERACTION, ({ interactionType, payload }) => {
-        logEvent('genui', `Interaction: ${interactionType}`);
+    sdk.on(KalturaAvatarSDK.Events.GENUI_INTERACTION, function(data) {
+        logEvent('genui', 'Interaction: ' + data.interactionType);
     });
 
-    sdk.on(KalturaAvatarSDK.Events.SERVER_CONNECTED, ({ agentName, loadingVideoUrl }) => {
-        logEvent('lifecycle', `Server connected — agent: ${agentName || 'unknown'}`);
+    sdk.on(KalturaAvatarSDK.Events.SERVER_CONNECTED, function(data) {
+        logEvent('lifecycle', 'Server connected — agent: ' + (data.agentName || 'unknown'));
     });
 
-    sdk.on(KalturaAvatarSDK.Events.CONFIGURED, (info) => {
-        logEvent('lifecycle', `Configured — ${info.agentName || 'agent'}, ${info.videosCount} videos, lang: ${info.language}`);
+    sdk.on(KalturaAvatarSDK.Events.CONFIGURED, function(info) {
+        logEvent('lifecycle', 'Configured — ' + (info.agentName || 'agent') + ', ' + info.videosCount + ' videos, lang: ' + info.language);
         if (info.features) {
-            logEvent('info', `Features: interruptions=${info.features.interruptions}, pause=${info.features.pause}, screenShare=${info.features.screenShare}`);
+            logEvent('info', 'Features: interruptions=' + info.features.interruptions + ', pause=' + info.features.pause + ', screenShare=' + info.features.screenShare);
         }
     });
 
-    sdk.on(KalturaAvatarSDK.Events.TIME_WARNING, ({ remainingSeconds }) => {
-        logEvent('warning', `Time warning: ${remainingSeconds}s remaining`);
+    sdk.on(KalturaAvatarSDK.Events.TIME_WARNING, function(data) {
+        logEvent('warning', 'Time warning: ' + data.remainingSeconds + 's remaining');
     });
 
-    sdk.on(KalturaAvatarSDK.Events.TIME_EXPIRED, () => {
+    sdk.on(KalturaAvatarSDK.Events.TIME_EXPIRED, function() {
         logEvent('warning', 'Session time expired');
     });
 
+    // Attach KAVA analytics plugin if enabled
+    if (document.getElementById('cfg-kava').checked) {
+        var partnerId = document.getElementById('cfg-partner-id').value.trim();
+        if (partnerId) {
+            try {
+                analytics = new KalturaAvatarAnalytics(sdk, {
+                    ks: 'demo-session',
+                    partnerId: Number(partnerId),
+                    debug: true
+                });
+                analytics.on('sent', function(evt) {
+                    logEvent('kava', 'Sent: type=' + evt.eventType + ' idx=' + evt.params.eventIndex);
+                });
+                analytics.on('error', function(evt) {
+                    logEvent('kava', 'Error: type=' + evt.eventType + ' ' + evt.error.message);
+                });
+                logEvent('kava', 'Plugin attached (PID: ' + partnerId + ')');
+            } catch (err) {
+                logEvent('error', 'KAVA init failed: ' + err.message);
+            }
+        } else {
+            logEvent('warning', 'KAVA enabled but no Partner ID provided');
+        }
+    }
+
     // Start connection
     updateUI('connecting');
-    sdk.connect().catch((err) => {
-        logEvent('error', `Connection failed: ${err.message}`);
+    sdk.connect().catch(function(err) {
+        logEvent('error', 'Connection failed: ' + err.message);
         updateUI('disconnected');
     });
 }
 
-function doDisconnect() {
+function disconnect() {
     if (!sdk) return;
+    if (analytics) {
+        var stats = analytics.getStats();
+        logEvent('kava', 'Stats: ' + stats.eventsSent + ' sent, ' + stats.errors + ' errors, ' + stats.callDuration + 's call');
+        analytics.destroy();
+        analytics = null;
+    }
     sdk.end();
     updateUI('disconnected');
 }
 
-function doSendText() {
-    const input = document.getElementById('text-input');
-    const text = input.value.trim();
+function sendText() {
+    var input = document.getElementById('text-input');
+    var text = input.value.trim();
     if (!text || !sdk) return;
     sdk.sendText(text);
     input.value = '';
 }
 
-function doInjectDPP() {
+function injectDPP() {
     if (!sdk) return;
-    const textarea = document.getElementById('dpp-textarea');
-    const text = textarea.value.trim();
+    var textarea = document.getElementById('dpp-textarea');
+    var text = textarea.value.trim();
     if (!text) return;
     try {
         sdk.injectDPP(text);
-        logEvent('dpp', `Injected: ${text.substring(0, 60)}...`);
+        logEvent('dpp', 'Injected: ' + text.substring(0, 60) + '...');
     } catch (err) {
-        logEvent('error', `DPP error: ${err.message}`);
+        logEvent('error', 'DPP error: ' + err.message);
     }
 }
 
 // ── UI Helpers ──
 
 function switchTab(id, btn) {
-    btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    var buttons = btn.parentElement.querySelectorAll('button');
+    for (var i = 0; i < buttons.length; i++) buttons[i].classList.remove('active');
     btn.classList.add('active');
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    var panels = document.querySelectorAll('.panel');
+    for (var i = 0; i < panels.length; i++) panels[i].classList.remove('active');
     document.getElementById('panel-' + id).classList.add('active');
 }
 
 function updateUI(state) {
-    const badge = document.getElementById('status-badge');
-    const dot = document.getElementById('dot-state');
-    const lbl = document.getElementById('lbl-state');
+    var badge = document.getElementById('status-badge');
+    var dot = document.getElementById('dot-state');
+    var lbl = document.getElementById('lbl-state');
 
     badge.style.display = '';
     dot.className = 'dot ' + (state === 'connected' ? 'green' : state === 'connecting' ? 'yellow' : 'gray');
@@ -318,57 +370,102 @@ function updateUI(state) {
 }
 
 function addBubble(role, text) {
-    const container = document.getElementById('transcript');
-    const empty = container.querySelector('.empty-state');
+    var container = document.getElementById('transcript');
+    var empty = container.querySelector('.empty-state');
     if (empty) empty.remove();
-    const el = document.createElement('div');
+    var el = document.createElement('div');
     el.className = 'bubble ' + role;
-    el.innerHTML = `<div class="role">${role === 'avatar' ? 'Avatar' : 'You'}</div>${escapeHtml(text)}`;
+    var roleLabel = document.createElement('div');
+    roleLabel.className = 'role';
+    roleLabel.textContent = role === 'avatar' ? 'Avatar' : 'You';
+    el.appendChild(roleLabel);
+    el.appendChild(document.createTextNode(text));
     container.appendChild(el);
     container.scrollTop = container.scrollHeight;
 }
 
 function logEvent(type, text, data) {
-    const log = document.getElementById('event-log');
-    const entry = document.createElement('div');
+    var log = document.getElementById('event-log');
+    var entry = document.createElement('div');
     entry.className = 'log-entry';
-    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    let detail = '';
+    var time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    var detail = '';
     if (data && typeof data === 'object') {
         try { detail = JSON.stringify(data); } catch(e) {}
     }
-    entry.innerHTML = `<span class="time">${time}</span><span class="name">${escapeHtml(text)}</span>${detail ? `<span class="detail">${escapeHtml(detail)}</span>` : ''}`;
+    var timeSpan = document.createElement('span');
+    timeSpan.className = 'time';
+    timeSpan.textContent = time;
+    var nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = text;
+    entry.appendChild(timeSpan);
+    entry.appendChild(nameSpan);
+    if (detail) {
+        var detailSpan = document.createElement('span');
+        detailSpan.className = 'detail';
+        detailSpan.textContent = detail;
+        entry.appendChild(detailSpan);
+    }
     log.appendChild(entry);
     log.scrollTop = log.scrollHeight;
 }
 
 function updateCommandList() {
-    const list = document.getElementById('cmd-list');
-    if (!sdk) { list.innerHTML = ''; return; }
-    const commands = sdk.getCommands ? sdk.getCommands() : [];
+    var list = document.getElementById('cmd-list');
+    if (!sdk) { list.textContent = ''; return; }
+    var commands = sdk.getCommands ? sdk.getCommands() : [];
+    list.textContent = '';
     if (commands.length === 0) {
-        list.innerHTML = '<div class="cmd"><strong>end-session</strong> — triggers on "ending call now"</div>';
+        var cmd = document.createElement('div');
+        cmd.className = 'cmd';
+        cmd.textContent = 'end-session — triggers on "ending call now"';
+        list.appendChild(cmd);
     } else {
-        list.innerHTML = commands.map(c => `<div class="cmd"><strong>${escapeHtml(c.name)}</strong> — ${escapeHtml(String(c.pattern))}</div>`).join('');
+        for (var i = 0; i < commands.length; i++) {
+            var cmd = document.createElement('div');
+            cmd.className = 'cmd';
+            cmd.textContent = commands[i].name + ' — ' + String(commands[i].pattern);
+            list.appendChild(cmd);
+        }
     }
 }
 
 function addServerEvent(type, data) {
-    const log = document.getElementById('server-events-log');
-    const entry = document.createElement('div');
+    var log = document.getElementById('server-events-log');
+    var entry = document.createElement('div');
     entry.className = 'log-entry';
-    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const detail = data ? JSON.stringify(data) : '';
-    entry.innerHTML = `<span class="time">${time}</span><span class="name">${escapeHtml(type)}</span>${detail ? `<span class="detail">${escapeHtml(detail)}</span>` : ''}`;
+    var time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    var detail = data ? JSON.stringify(data) : '';
+    var timeSpan = document.createElement('span');
+    timeSpan.className = 'time';
+    timeSpan.textContent = time;
+    var nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = type;
+    entry.appendChild(timeSpan);
+    entry.appendChild(nameSpan);
+    if (detail) {
+        var detailSpan = document.createElement('span');
+        detailSpan.className = 'detail';
+        detailSpan.textContent = detail;
+        entry.appendChild(detailSpan);
+    }
     log.appendChild(entry);
     log.scrollTop = log.scrollHeight;
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// Expose minimal API for testing without global pollution
+window._demoApp = { getAnalytics: function() { return analytics; } };
+
+// Expose handlers for HTML onclick attributes
+window.doConnect = connect;
+window.doDisconnect = disconnect;
+window.doSendText = sendText;
+window.doInjectDPP = injectDPP;
+window.switchTab = switchTab;
+
+})();
 </script>
 </body>
 </html>
