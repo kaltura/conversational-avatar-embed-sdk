@@ -94,6 +94,13 @@
 </header>
 
 <div class="config-bar">
+    <label>Server:</label>
+    <select id="cfg-server" style="padding:6px 8px;background:#181828;border:1px solid #2a2a3a;border-radius:6px;color:#e0e0e8;font-size:12px;">
+        <option value="https://conversation.avatar.us.kaltura.ai">US Production</option>
+        <option value="https://conversation.avatar.qa.kaltura.ai">QA</option>
+        <option value="custom">Custom...</option>
+    </select>
+    <input type="text" id="cfg-server-custom" value="" placeholder="wss://custom-server" style="width:180px;display:none">
     <label>Client ID:</label>
     <input type="text" id="cfg-client-id" value="115767973963657880005" placeholder="Client ID">
     <label>Flow ID:</label>
@@ -176,6 +183,12 @@ document.getElementById('cfg-kava').addEventListener('change', function() {
     document.getElementById('cfg-partner-id').style.display = show;
 });
 
+// Server selector toggles custom URL field
+document.getElementById('cfg-server').addEventListener('change', function() {
+    var custom = document.getElementById('cfg-server-custom');
+    custom.style.display = this.value === 'custom' ? '' : 'none';
+});
+
 // Text input keyboard shortcut
 document.getElementById('text-input').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') sendText();
@@ -191,15 +204,27 @@ function connect() {
     if (analytics) { analytics.destroy(); analytics = null; }
 
     var captionsEnabled = document.getElementById('cfg-captions').checked;
+    var serverSelect = document.getElementById('cfg-server');
+    var serverUrl = serverSelect.value === 'custom'
+        ? document.getElementById('cfg-server-custom').value.trim()
+        : serverSelect.value;
 
-    sdk = new KalturaAvatarSDK({
+    var sdkConfig = {
         clientId: clientId,
         flowId: flowId,
         container: '#avatar-container',
         debug: true,
         media: { ariaLabel: 'Demo Avatar' },
         captions: { enabled: captionsEnabled }
-    });
+    };
+    if (serverUrl) {
+        var region = serverUrl.match(/avatar\.(\w+)\.kaltura/);
+        var whepUrl = region ? 'https://srs.avatar.' + region[1] + '.kaltura.ai' : null;
+        sdkConfig.endpoints = { socket: serverUrl };
+        if (whepUrl) sdkConfig.endpoints.whep = whepUrl;
+    }
+
+    sdk = new KalturaAvatarSDK(sdkConfig);
 
     // Register demo commands
     sdk.registerCommand('end-session', 'ending call now', function(match) {

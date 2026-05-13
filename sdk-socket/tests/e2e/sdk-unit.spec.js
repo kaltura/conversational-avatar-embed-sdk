@@ -2229,4 +2229,446 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     });
     expect(result).toBe(0);
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // CAPTIONS: Server-timed path (stvSpeechChunk)
+  // ────────────────────────────────────────────────────────────────────
+
+  test('onServerChunk emits caption-start on first chunk', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let started = false;
+      emitter.on('caption-start', () => { started = true; });
+      cm.onServerChunk('Hello world.', 'sp-1', 1500);
+      cm.destroy();
+      return started;
+    });
+    expect(result).toBe(true);
+  });
+
+  test('onServerChunk emits caption-segment immediately', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      const segments = [];
+      emitter.on('caption-segment', (p) => { segments.push(p); });
+      cm.onServerChunk('Hello world.', 'sp-1', 1500);
+      cm.destroy();
+      return { count: segments.length, text: segments[0]?.text, responseId: segments[0]?.responseId };
+    });
+    expect(result.count).toBe(1);
+    expect(result.text).toBe('Hello world.');
+    expect(result.responseId).toBe('sp-1');
+  });
+
+  test('onServerChunk segments long text proportionally within durationMs', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false, maxCharsPerLine: 20, maxLines: 1 }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push({ text: p.text, time: Date.now() }); });
+        // 50 chars with 20-char line limit → multiple segments, 2000ms total
+        cm.onServerChunk('Hello there my dear friend. How are you doing today?', 'sp-1', 2000);
+        setTimeout(() => {
+          cm.destroy();
+          resolve(segments.length);
+        }, 2500);
+      });
+    });
+    expect(result).toBeGreaterThanOrEqual(2);
+  });
+
+  test('onServerChunk activates server-timed mode (isServerTimed)', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      const before = cm.isServerTimed();
+      cm.onServerChunk('Hello.', 'sp-1', 1000);
+      const after = cm.isServerTimed();
+      cm.destroy();
+      return { before, after };
+    });
+    expect(result.before).toBe(false);
+    expect(result.after).toBe(true);
+  });
+
+  test('server-timed mode suppresses heuristic onSpeakingStart', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        // Activate server-timed path
+        cm.onServerChunk('Hello from server.', 'sp-1', 1000);
+        // This should be a no-op in server-timed mode
+        cm.onSpeakingStart();
+        setTimeout(() => {
+          cm.destroy();
+          // Segments should only be from onServerChunk, not tick-based heuristics
+          resolve(segments);
+        }, 1200);
+      });
+    });
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    expect(result[0]).toBe('Hello from server.');
+  });
+
+  test('multiple onServerChunk calls queue segments sequentially', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        cm.onServerChunk('First chunk.', 'sp-1', 500);
+        cm.onServerChunk('Second chunk.', 'sp-1', 500);
+        setTimeout(() => {
+          cm.destroy();
+          resolve(segments);
+        }, 1200);
+      });
+    });
+    expect(result).toContain('First chunk.');
+    expect(result).toContain('Second chunk.');
+  });
+
+  test('onServerChunk ignores empty text (sentinel chunks)', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let segCount = 0;
+      emitter.on('caption-segment', () => { segCount++; });
+      emitter.on('caption-start', () => { segCount += 100; });
+      cm.onServerChunk('', 'sp-1', 1);
+      cm.onServerChunk('   ', 'sp-1', 1);
+      cm.destroy();
+      return segCount;
+    });
+    expect(result).toBe(0);
+  });
+
+  test('onServerChunk strips SSML tags', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let text = '';
+      emitter.on('caption-segment', (p) => { text = p.text; });
+      cm.onServerChunk('<speak>Hello <break time="200ms"/>world.</speak>', 'sp-1', 1000);
+      cm.destroy();
+      return text;
+    });
+    expect(result).toBe('Hello world.');
+  });
+
+  test('interrupt clears server-timed queue', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const events = [];
+        emitter.on('caption-segment', (p) => { events.push('seg:' + p.text); });
+        emitter.on('caption-interrupted', () => { events.push('interrupted'); });
+        cm.onServerChunk('First.', 'sp-1', 2000);
+        cm.onServerChunk('Second.', 'sp-1', 2000);
+        // Interrupt after first segment shows but before second
+        setTimeout(() => {
+          cm.interrupt();
+          setTimeout(() => resolve(events), 500);
+        }, 100);
+      });
+    });
+    expect(result).toContain('seg:First.');
+    expect(result).toContain('interrupted');
+    expect(result).not.toContain('seg:Second.');
+  });
+
+  test('new speechId interrupts existing server-timed response', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const events = [];
+        emitter.on('caption-start', (p) => { events.push('start:' + p.responseId); });
+        emitter.on('caption-interrupted', (p) => { events.push('int:' + p.responseId); });
+        emitter.on('caption-segment', (p) => { events.push('seg:' + p.responseId); });
+        cm.onServerChunk('From first response.', 'sp-1', 3000);
+        setTimeout(() => {
+          cm.onServerChunk('From second response.', 'sp-2', 1000);
+          setTimeout(() => {
+            cm.destroy();
+            resolve(events);
+          }, 1200);
+        }, 100);
+      });
+    });
+    expect(result).toContain('start:sp-1');
+    expect(result).toContain('int:sp-1');
+    expect(result).toContain('start:sp-2');
+    expect(result).toContain('seg:sp-2');
+  });
+
+  test('onSpeakingEnd after server-timed emits caption-end when queue drains', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        let endFired = false;
+        let endId = null;
+        emitter.on('caption-end', (p) => { endFired = true; endId = p.responseId; });
+        cm.onServerChunk('Short.', 'sp-1', 200);
+        // Simulate stvFinishedTalking arriving after chunk
+        setTimeout(() => {
+          cm.onSpeakingEnd('Short.', 'sp-1');
+          setTimeout(() => resolve({ endFired, endId }), 500);
+        }, 50);
+      });
+    });
+    expect(result.endFired).toBe(true);
+    expect(result.endId).toBe('sp-1');
+  });
+
+  test('server-timed captions do not fire when disabled', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: false, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      let count = 0;
+      emitter.on('caption-start', () => count++);
+      emitter.on('caption-segment', () => count++);
+      cm.onServerChunk('Hello.', 'sp-1', 1000);
+      cm.destroy();
+      return count;
+    });
+    expect(result).toBe(0);
+  });
+
+  test('fallback path still works when no stvSpeechChunk received', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        // Heuristic path: onChunk + onSpeakingStart + onSpeakingEnd
+        cm.onChunk('Hello world. Goodbye world.', 'sp-1');
+        cm.onSpeakingStart();
+        setTimeout(() => {
+          cm.onSpeakingEnd('Hello world. Goodbye world.', 'sp-1');
+          resolve(segments.length);
+        }, 100);
+      });
+    });
+    expect(result).toBeGreaterThanOrEqual(1);
+  });
+
+  test('server-timed path calibrates rate estimator for future fallback', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, CaptionRateEstimator, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const initialRate = cm._rate.charsPerSec;
+        cm.onServerChunk('Hello.', 'sp-1', 200);
+        cm._speakingStartTime = Date.now() - 1000;
+        cm.onSpeakingEnd('Hello there friend.', 'sp-1');
+        setTimeout(() => {
+          const calibratedRate = cm._rate.charsPerSec;
+          resolve({ initialRate, calibratedRate, changed: initialRate !== calibratedRate });
+        }, 300);
+      });
+    });
+    expect(result.changed).toBe(true);
+  });
+
+  test('onServerChunk applies CaptionFilter (replacements)', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false, replacements: { 'Kaltura': 'Kal-tura' } }, { debug() {}, info() {}, warn() {}, error() {} });
+      let text = '';
+      emitter.on('caption-segment', (p) => { text = p.text; });
+      cm.onServerChunk('Welcome to Kaltura.', 'sp-1', 1000);
+      cm.destroy();
+      return text;
+    });
+    expect(result).toBe('Welcome to Kal-tura.');
+  });
+
+  test('onGenerationComplete is safe with mismatched speechId', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      cm.onServerChunk('Hello.', 'sp-1', 500);
+      // Call with wrong speechId — should be harmless
+      cm.onGenerationComplete('sp-999');
+      cm.destroy();
+      return true;
+    });
+    expect(result).toBe(true);
+  });
+
+  test('destroy clears server-timed timers', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        cm.onServerChunk('First.', 'sp-1', 500);
+        cm.onServerChunk('Second.', 'sp-1', 500);
+        // Destroy immediately — should stop further segment emissions
+        setTimeout(() => {
+          const countBefore = segments.length;
+          cm.destroy();
+          setTimeout(() => {
+            resolve({ countBefore, countAfter: segments.length });
+          }, 1500);
+        }, 50);
+      });
+    });
+    // Only the first segment should have shown before destroy
+    expect(result.countBefore).toBe(1);
+    expect(result.countAfter).toBe(1);
+  });
+
+  test('server-timed segment indexes are sequential across chunks', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const indexes = [];
+        emitter.on('caption-segment', (p) => { indexes.push(p.index); });
+        cm.onServerChunk('First chunk.', 'sp-1', 200);
+        cm.onServerChunk('Second chunk.', 'sp-1', 200);
+        cm.onServerChunk('Third chunk.', 'sp-1', 200);
+        setTimeout(() => {
+          cm.destroy();
+          resolve(indexes);
+        }, 800);
+      });
+    });
+    expect(result).toEqual([0, 1, 2]);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // TURN HOST DERIVATION & ICE SERVERS
+  // ────────────────────────────────────────────────────────────────────
+
+  test('TURN host derived from US production socket URL', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({
+        clientId: 'test', flowId: 'test',
+        endpoints: { socket: 'https://conversation.avatar.us.kaltura.ai' }
+      });
+      const whep = sdk._whep;
+      const servers = whep._buildIceServers();
+      sdk.destroy();
+      return servers[0].urls;
+    });
+    expect(result).toContain('turn:turn.avatar.us.kaltura.ai:80?transport=udp');
+    expect(result).toContain('turn:turn.avatar.us.kaltura.ai:443?transport=udp');
+    expect(result).toContain('turn:turn.avatar.us.kaltura.ai:80?transport=tcp');
+    expect(result).toContain('turns:turn.avatar.us.kaltura.ai:443?transport=tcp');
+  });
+
+  test('TURN host derived from QA socket URL', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({
+        clientId: 'test', flowId: 'test',
+        endpoints: { socket: 'https://conversation.avatar.qa.kaltura.ai' }
+      });
+      const whep = sdk._whep;
+      const servers = whep._buildIceServers();
+      sdk.destroy();
+      return servers[0].urls;
+    });
+    expect(result).toContain('turn:turn.avatar.qa.kaltura.ai:80?transport=udp');
+    expect(result).toContain('turns:turn.avatar.qa.kaltura.ai:443?transport=tcp');
+  });
+
+  test('TURN host defaults to US when no socket URL configured', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: 'test', flowId: 'test' });
+      const whep = sdk._whep;
+      const servers = whep._buildIceServers();
+      sdk.destroy();
+      return servers[0].urls;
+    });
+    expect(result).toContain('turn:turn.avatar.us.kaltura.ai:80?transport=udp');
+    expect(result).toContain('turns:turn.avatar.us.kaltura.ai:443?transport=tcp');
+  });
+
+  test('TURN URLs fully overridden via config.turn.urls', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({
+        clientId: 'test', flowId: 'test',
+        endpoints: { socket: 'https://conversation.avatar.qa.kaltura.ai' },
+        turn: { urls: ['turn:custom.example.com:3478?transport=udp'] }
+      });
+      const whep = sdk._whep;
+      const servers = whep._buildIceServers();
+      sdk.destroy();
+      return servers[0].urls;
+    });
+    expect(result).toEqual(['turn:custom.example.com:3478?transport=udp']);
+  });
+
+  test('TURN credentials overridden via config.turn', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({
+        clientId: 'test', flowId: 'test',
+        turn: { username: 'myuser', credential: 'mypass' }
+      });
+      const whep = sdk._whep;
+      const servers = whep._buildIceServers();
+      sdk.destroy();
+      return { username: servers[0].username, credential: servers[0].credential };
+    });
+    expect(result).toEqual({ username: 'myuser', credential: 'mypass' });
+  });
+
+  test('all three WebRTC classes derive same TURN host', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({
+        clientId: 'test', flowId: 'test',
+        endpoints: { socket: 'https://conversation.avatar.qa.kaltura.ai' }
+      });
+      const whepUrls = sdk._whep._buildIceServers()[0].urls;
+      const asrUrls = sdk._asr._buildIceServers()[0].urls;
+      const audioUrls = sdk._audioFallback._buildIceServers()[0].urls;
+      sdk.destroy();
+      return { whep: whepUrls, asr: asrUrls, audio: audioUrls };
+    });
+    expect(result.whep).toEqual(result.asr);
+    expect(result.whep).toEqual(result.audio);
+    expect(result.whep[0]).toContain('turn.avatar.qa.kaltura.ai');
+  });
+
+  test('getClientId and getFlowId return config values', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: 'my-client-123', flowId: 'agent-42' });
+      const res = { clientId: sdk.getClientId(), flowId: sdk.getFlowId() };
+      sdk.destroy();
+      return res;
+    });
+    expect(result).toEqual({ clientId: 'my-client-123', flowId: 'agent-42' });
+  });
 });

@@ -55,9 +55,9 @@ All classes are defined inside the UMD factory function (not exported individual
 | `GenUIManager` | Orchestrator: socket events → renderer dispatch |
 | `CaptionSegmenter` | Splits text into display-ready segments respecting word/sentence boundaries |
 | `CaptionScheduler` | Schedules segment emissions at estimated timing intervals |
-| `CaptionRateEstimator` | Calibrates chars/sec from observed speaking durations |
+| `CaptionRateEstimator` | Calibrates chars/sec from observed speaking durations (fallback path) |
 | `CaptionRenderer` | DOM rendering with WCAG AA accessibility, keyboard, ARIA |
-| `CaptionManager` | Orchestrator: text chunks → segmentation → scheduled emission |
+| `CaptionManager` | Dual-source orchestrator: server-timed (stvSpeechChunk) primary, heuristic fallback |
 | `ServerInfo` | Parses and stores server configuration |
 | `KalturaAvatarSDK` | Public API class (facade over all above) |
 
@@ -211,6 +211,55 @@ Categories:
 
 ## Caption Pipeline
 
+The caption system uses **dual-source timing**: server-timed chunks (authoritative) with automatic fallback to heuristic estimation for backward compatibility.
+
+### Primary Path — Server-Timed (stvSpeechChunk)
+
+```
+stvSpeechChunk { text, speechId, durationMs }   ← committed chunk with exact duration
+       │
+       ▼
+CaptionManager.onServerChunk(text, speechId, durationMs)
+  • Strip SSML tags, ignore empty sentinels (text="" durationMs=1)
+  • If new speechId: interrupt previous, emit 'caption-start'
+  • Segment text (respecting maxCharsPerLine/maxLines)
+  • Distribute durationMs proportionally across segments by char count
+  • Queue segments with scheduled timers for sequential display
+  • First segment shows immediately, subsequent show after their duration elapses
+
+stvSpeechChunk (more chunks)                    ← additional chunks queue up
+       │
+       ▼
+  • New segments appended to queue
+  • Timer-based drain continues sequentially
+
+stvFinishedGenerating { speechId }              ← all chunks sent to pipeline
+       │
+       ▼
+CaptionManager.onGenerationComplete(speechId)
+  • Informational signal; queue continues draining naturally
+
+stvFinishedTalking { agentContent }             ← audio ends
+       │
+       ▼
+CaptionManager.onSpeakingEnd(fullText)
+  • Waits for queue to drain, then emits 'caption-end'
+  • Calibrates rate estimator (for future fallback use)
+  • Hold last segment visible (default 2s), then fade out
+
+userStartedTalking                              ← user interrupts
+       │
+       ▼
+CaptionManager.interrupt()
+  • Clears queue and active timer
+  • Emit 'caption-interrupted'
+  • Immediate fade out
+```
+
+### Fallback Path — Heuristic (debug_stvTaskGenerated)
+
+Active when server does NOT emit `stvSpeechChunk`:
+
 ```
 debug_stvTaskGenerated { text, speechId }   ← text chunks arrive BEFORE audio
        │
@@ -227,6 +276,7 @@ stvStartedTalking                           ← audio playback begins
        │
        ▼
 CaptionManager.onSpeakingStart()
+  • Suppressed if server-timed path is active (no-op)
   • Record start timestamp (t₀)
   • _appendNewSegments(), show segment[0] if complete
   • Start 200ms tick
@@ -238,14 +288,6 @@ tick (every 200ms)                          ← timing loop
   • If yes: advance to next segment
   • If no complete segment yet: wait for more chunks
 
-debug_stvTaskGenerated (while speaking)     ← more chunks stream in
-       │
-       ▼
-CaptionManager.onChunk(delta, speechId)
-  • _textBuffer += delta
-  • _appendNewSegments(): new complete sentences become new segments
-  • Tick picks up new trailing segments naturally
-
 stvFinishedTalking { agentContent }         ← audio ends
        │
        ▼
@@ -256,29 +298,28 @@ CaptionManager.onSpeakingEnd(fullText)
   • Calibrate rate using fullText length (authoritative) / actualDuration → EMA α=0.3
   • Emit 'caption-end'
   • Hold last segment visible (default 2s), then fade out
-
-userStartedTalking                          ← user interrupts
-       │
-       ▼
-CaptionManager.interrupt()
-  • Stop tick
-  • Emit 'caption-interrupted'
-  • Immediate fade out
 ```
+
+### Source Priority
+
+When `stvSpeechChunk` fires, the CaptionManager enters server-timed mode for that response. In this mode:
+- `onChunk()` calls from `debug_stvTaskGenerated` are suppressed (caption timing only)
+- `onSpeakingStart()` is a no-op (no tick needed — timers are authoritative)
+- `debug_stvTaskGenerated` still fires `avatar-text-ready` events and command checks
+- The heuristic rate estimator is still calibrated at speaking-end for future fallback use
 
 **Key design decisions:**
 - **Append-only segments:** `_segments[]` is never rebuilt. Once a segment is committed it never changes. This eliminates display-index drift that caused skipped content.
 - **Commit boundary:** `_commitBoundary` tracks how many chars of `_textBuffer` have been consumed into segments. Only text up to the last sentence boundary is committed (incomplete trailing text waits for more chunks).
 - **SpeechId continuity:** The server may rotate speechId mid-utterance (observed: 3 IDs per single greeting). If `onChunk` sees a new speechId but the buffer already has content, it continues accumulating (same utterance). Only an empty buffer signals a truly new response.
 - **No fullText buffer replacement:** `onSpeakingEnd(fullText)` does NOT overwrite `_textBuffer` with `fullText`. The fullText from `stvFinishedTalking` often differs slightly (newlines, em-dashes, spacing) which would misalign `_commitBoundary` and produce residual fragments. Instead, fullText is used only for rate calibration (authoritative char count).
-- **SSML stripping:** `<break>`, `<prosody>`, and other TTS markup tags are stripped from chunks in `onChunk` and again in `CaptionFilter.apply()` before display. An SSML-only chunk is silently dropped.
+- **SSML stripping:** `<break>`, `<prosody>`, and other TTS markup tags are stripped from chunks in both `onChunk` and `onServerChunk`, and again in `CaptionFilter.apply()` before display. An SSML-only chunk is silently dropped.
 - **Delta accumulation:** The socket handler detects whether the server sends cumulative or delta text and accumulates `_beforeBuffer` correctly in both modes.
-- Text arrives BEFORE audio → chunks buffer silently until speaking starts
-- First segment only shown when it ends at a natural boundary (sentence punctuation or segmenter split)
-- No word-level timing from server → tick-based advancement using chars/sec rate
+- **Empty sentinel filtering:** `stvSpeechChunk` fires empty chunks (`text: "", durationMs: 1`) before `stvFinishedGenerating` — these are filtered out at the socket handler level.
+- Text arrives BEFORE audio → chunks buffer silently until speaking starts (fallback path)
+- Server-timed path: each chunk shows immediately upon receipt; timing matches audio exactly
 - Default rate: 11 chars/sec; calibrates from observed speaking duration after each utterance
 - Rate calibration converges after 2-3 utterances via exponential moving average (α=0.3)
-- Each segment's display time is self-contained (its own char count / rate) — no cumulative drift
 - **Caption filter:** `CaptionFilter` reverses TTS phonetic spellings (word-boundary-aware, longest-match-first) and normalizes punctuation/spacing before display
 - `aria-live="off"` when audio audible (deaf/HoH read visually); switches to `aria-live="polite"` when video muted
 - Toggle state announced to screen readers via `role="status"` live region
@@ -443,7 +484,7 @@ sdk.on('time-expired', () => showSessionEndedUI());
 Two separate, independent WebRTC connections (see Protocol & Transport Details above for full ASR signaling):
 
 1. **WHEP (receive-only)** — avatar video + audio FROM server
-   - Uses HTTP-based SDP exchange (POST to `srs.avatar.us.kaltura.ai/rtc/v1/whep/`)
+   - Uses HTTP-based SDP exchange (POST to `srs.avatar.{region}.kaltura.ai/rtc/v1/whep/`)
    - Receive-only: `addTransceiver('audio/video', { direction: 'recvonly' })`
    - Stream ID = session_id from `stvNewSession` response
    - ICE transport policy: `relay` (always via TURN for NAT traversal reliability)
@@ -456,6 +497,31 @@ Two separate, independent WebRTC connections (see Protocol & Transport Details a
    - ICE transport policy: `all` (direct + relay — more permissive for low-latency audio)
    - Non-fatal: if ASR fails, SDK continues in text-only mode
    - Server performs speech-to-text and emits transcription events back via Socket.IO
+
+### TURN Server Derivation
+
+TURN hosts are auto-derived from the socket endpoint URL via `deriveTurnHost()`:
+
+```
+endpoints.socket = "https://conversation.avatar.qa.kaltura.ai"
+                                          ^^
+                                     region extracted
+                                          ↓
+              turn host = "turn.avatar.qa.kaltura.ai"
+```
+
+Each `_buildIceServers()` produces four ICE server URLs:
+
+| Scheme | Host | Port | Transport |
+|--------|------|------|-----------|
+| `turn:` | `turn.avatar.{region}.kaltura.ai` | 80 | UDP |
+| `turn:` | `turn.avatar.{region}.kaltura.ai` | 443 | UDP |
+| `turn:` | `turn.avatar.{region}.kaltura.ai` | 80 | TCP |
+| `turns:` | `turn.avatar.{region}.kaltura.ai` | 443 | TCP |
+
+If no socket URL is configured (or the regex doesn't match), region defaults to `us`.
+
+**Full override:** If `config.turn.urls` is provided, auto-derivation is bypassed entirely — the provided array is used as-is for all WebRTC connections.
 
 ---
 

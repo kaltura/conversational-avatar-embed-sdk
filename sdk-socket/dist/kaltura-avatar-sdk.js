@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.5.9
+ * @version 2.6.0
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.5.9';
+  const VERSION = '2.6.0';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -121,12 +121,16 @@
     QUEUE_TIMEOUT: 6003
   });
 
+  function deriveTurnHost(socketUrl) {
+    const m = socketUrl && socketUrl.match(/avatar\.([a-z0-9]+)\.kaltura/);
+    const region = m ? m[1] : 'us';
+    return 'turn.avatar.' + region + '.kaltura.ai';
+  }
+
   const DEFAULTS = Object.freeze({
     SOCKET_URL: 'https://conversation.avatar.us.kaltura.ai',
     SOCKET_PATH: '/socket.io',
     WHEP_URL: 'https://srs.avatar.us.kaltura.ai',
-    TURN_HOST: 'turn.avatar.us.kaltura.ai',
-    TURNS_HOST: 'turns.avatar.us.kaltura.ai',
     TURN_USERNAME: 'kaltura',
     TURN_CREDENTIAL: 'avatar',
     CONNECTION_TIMEOUT: 15000,
@@ -1128,20 +1132,24 @@
 
   class CaptionManager {
     /**
-     * Timing design:
+     * Dual-source timing:
      *
+     * PRIMARY (server-timed via stvSpeechChunk):
+     *   onServerChunk(text, speechId, durationMs) — Each chunk has exact play duration.
+     *     Segments the chunk text, schedules each segment proportionally within durationMs.
+     *     No rate estimation needed — timing is authoritative from the server.
+     *   onGenerationComplete(speechId) — All chunks sent; optional signal for UI.
+     *
+     * FALLBACK (heuristic-based via debug_stvTaskGenerated):
      *   onChunk()         — Buffers text. Emits caption-start on first chunk.
      *   onSpeakingStart() — Segments the full buffer, shows segment[0], starts tick.
      *   _onTick() (200ms) — Checks if current segment's display time is up.
      *                        Display time = segment.length / rate (chars/sec).
-     *                        If time is up, advance to next segment.
-     *   onChunk() while speaking — Appends to buffer, re-segments. Tick picks
-     *                        up new trailing segments naturally.
      *   onSpeakingEnd()   — Flushes any unseen segments, calibrates rate.
      *
-     * Key invariant: each segment's display duration is computed from its own
-     * character count at show-time. No cumulative offsets, no total-duration
-     * estimation, no reference to buffer length. Simple and drift-free.
+     * When stvSpeechChunk is received, it takes priority and the heuristic path
+     * is suppressed for that response. This enables backward compatibility with
+     * servers that don't emit stvSpeechChunk.
      */
     constructor(emitter, config, logger) {
       this._emitter = emitter;
@@ -1171,6 +1179,12 @@
       this._speaking = false;
       this._active = false;
       this._tick = null;
+
+      // Server-timed state (stvSpeechChunk path)
+      this._serverTimed = false;
+      this._serverQueue = [];
+      this._serverTimer = null;
+      this._serverSegmentIndex = 0;
 
       if (c.enabled === undefined && typeof localStorage !== 'undefined') {
         try {
@@ -1271,8 +1285,103 @@
       this._appendNewSegments();
     }
 
+    // ── Server-timed path (stvSpeechChunk) ───────────────────────────────
+
+    onServerChunk(text, speechId, durationMs) {
+      if (!this._enabled) return;
+      if (!text || !text.trim()) return;
+
+      text = text.replace(/<[^>]+>/g, '');
+      if (!text.trim()) return;
+
+      const rid = speechId || this._responseId || this._generateId();
+
+      if (rid !== this._responseId) {
+        if (this._active) this._interruptServer();
+        this._responseId = rid;
+        this._serverTimed = true;
+        this._serverQueue = [];
+        this._serverSegmentIndex = 0;
+        this._active = true;
+        this._emitter.emit(Events.CAPTION_START, { responseId: this._responseId });
+      }
+
+      if (!this._serverTimed) {
+        this._serverTimed = true;
+        this._stopTick();
+      }
+
+      const segments = this._segmenter.segment(text);
+      if (segments.length === 0) return;
+
+      const totalChars = segments.reduce((sum, s) => sum + s.length, 0);
+      for (const seg of segments) {
+        const segDuration = totalChars > 0 ? Math.round((seg.length / totalChars) * durationMs) : durationMs;
+        this._serverQueue.push({ text: seg, durationMs: segDuration });
+      }
+
+      if (!this._serverTimer) {
+        this._drainServerQueue();
+      }
+    }
+
+    onGenerationComplete(speechId) {
+      if (!this._enabled || !this._active) return;
+      if (speechId && speechId !== this._responseId) return;
+      // All server chunks received — queue will drain naturally via timers
+    }
+
+    _drainServerQueue() {
+      if (this._serverQueue.length === 0) {
+        this._serverTimer = null;
+        return;
+      }
+
+      const item = this._serverQueue.shift();
+      const filtered = this._filter.apply(item.text);
+
+      this._emitter.emit(Events.CAPTION_SEGMENT, {
+        text: filtered,
+        index: this._serverSegmentIndex,
+        total: this._serverSegmentIndex + this._serverQueue.length + 1,
+        isFinal: this._serverQueue.length === 0,
+        responseId: this._responseId
+      });
+      if (this._renderer && this._renderer.isToggledOn()) {
+        this._renderer.showSegment(filtered);
+      }
+
+      this._serverSegmentIndex++;
+      this._serverTimer = setTimeout(() => this._drainServerQueue(), item.durationMs);
+    }
+
+    _interruptServer() {
+      if (this._serverTimer) { clearTimeout(this._serverTimer); this._serverTimer = null; }
+      this._serverQueue = [];
+      if (this._active) {
+        this._emitter.emit(Events.CAPTION_INTERRUPTED, {
+          responseId: this._responseId,
+          lastSegmentIndex: Math.max(0, this._serverSegmentIndex - 1)
+        });
+        if (this._renderer) this._renderer.hideImmediate();
+      }
+      this._resetServer();
+    }
+
+    _resetServer() {
+      this._serverTimed = false;
+      this._serverQueue = [];
+      this._serverSegmentIndex = 0;
+      if (this._serverTimer) { clearTimeout(this._serverTimer); this._serverTimer = null; }
+    }
+
+    isServerTimed() { return this._serverTimed; }
+
+    // ── Heuristic path (debug_stvTaskGenerated fallback) ─────────────────
+
     onSpeakingStart() {
       if (!this._enabled || !this._active) return;
+      if (this._serverTimed) return;
       this._speakingStartTime = Date.now();
       this._speaking = true;
 
@@ -1289,6 +1398,30 @@
     onSpeakingEnd(fullText, speechId) {
       if (!this._enabled) {
         this._reset();
+        return;
+      }
+
+      // Server-timed path: let the queue drain on its own timers, then emit end
+      if (this._serverTimed) {
+        this._speaking = false;
+        // Calibrate rate for future fallback use
+        if (this._speakingStartTime > 0 && fullText) {
+          const duration = Date.now() - this._speakingStartTime;
+          this._rate.calibrate(fullText.length, duration);
+        }
+        // Schedule caption-end after queue drains
+        const waitForDrain = () => {
+          if (this._serverQueue.length === 0 && !this._serverTimer) {
+            this._emitter.emit(Events.CAPTION_END, { responseId: this._responseId });
+            if (this._renderer && this._renderer.isToggledOn()) {
+              this._renderer.holdThenHide(this._holdAfterEndMs);
+            }
+            this._reset();
+          } else {
+            setTimeout(waitForDrain, 50);
+          }
+        };
+        waitForDrain();
         return;
       }
 
@@ -1338,7 +1471,13 @@
       this._reset();
     }
 
-    interrupt() { this._interrupt(); }
+    interrupt() {
+      if (this._serverTimed) {
+        this._interruptServer();
+      } else {
+        this._interrupt();
+      }
+    }
 
     _interrupt() {
       if (!this._active) return;
@@ -1437,6 +1576,7 @@
       this._speakingStartTime = 0;
       this._speaking = false;
       this._stopTick();
+      this._resetServer();
     }
 
     _generateId() {
@@ -1446,6 +1586,7 @@
     destroy() {
       this._scheduler.cancel();
       this._stopTick();
+      this._resetServer();
       if (this._renderer) this._renderer.detach();
       this._reset();
     }
@@ -1561,11 +1702,12 @@
     set onConnectionLost(fn) { this._onConnectionLost = fn; }
 
     _buildIceServers() {
+      const host = deriveTurnHost(this._config.endpoints?.socket);
       const turn = this._config.turn?.urls || [
-        `turn:${DEFAULTS.TURN_HOST}:80?transport=udp`,
-        `turn:${DEFAULTS.TURN_HOST}:443?transport=udp`,
-        `turn:${DEFAULTS.TURN_HOST}:80?transport=tcp`,
-        `turns:${DEFAULTS.TURNS_HOST}:443?transport=tcp`
+        `turn:${host}:80?transport=udp`,
+        `turn:${host}:443?transport=udp`,
+        `turn:${host}:80?transport=tcp`,
+        `turns:${host}:443?transport=tcp`
       ];
       return [{
         urls: turn,
@@ -1704,11 +1846,12 @@
     get peerConnection() { return this._pc; }
 
     _buildIceServers() {
+      const host = deriveTurnHost(this._config.endpoints?.socket);
       const turn = this._config.turn?.urls || [
-        `turn:${DEFAULTS.TURN_HOST}:80?transport=udp`,
-        `turn:${DEFAULTS.TURN_HOST}:443?transport=udp`,
-        `turn:${DEFAULTS.TURN_HOST}:80?transport=tcp`,
-        `turns:${DEFAULTS.TURNS_HOST}:443?transport=tcp`
+        `turn:${host}:80?transport=udp`,
+        `turn:${host}:443?transport=udp`,
+        `turn:${host}:80?transport=tcp`,
+        `turns:${host}:443?transport=tcp`
       ];
       return [{
         urls: turn,
@@ -1880,11 +2023,12 @@
     get peerConnection() { return this._pc; }
 
     _buildIceServers() {
+      const host = deriveTurnHost(this._config.endpoints?.socket);
       const turn = this._config.turn?.urls || [
-        `turn:${DEFAULTS.TURN_HOST}:80?transport=udp`,
-        `turn:${DEFAULTS.TURN_HOST}:443?transport=udp`,
-        `turn:${DEFAULTS.TURN_HOST}:80?transport=tcp`,
-        `turns:${DEFAULTS.TURNS_HOST}:443?transport=tcp`
+        `turn:${host}:80?transport=udp`,
+        `turn:${host}:443?transport=udp`,
+        `turn:${host}:80?transport=tcp`,
+        `turns:${host}:443?transport=tcp`
       ];
       return [{
         urls: turn,
@@ -3483,8 +3627,23 @@
             }
             this._commands.check(_beforeBuffer, 'before');
             this._emitter.emit(Events.AVATAR_TEXT_READY, { text: delta, fullText: _beforeBuffer });
-            this._captions.onChunk(delta, data.speechId);
+            // Only feed heuristic captions if server-timed path is not active
+            if (!this._captions.isServerTimed()) {
+              this._captions.onChunk(delta, data.speechId);
+            }
           }
+        });
+
+        // Server-timed caption chunks (authoritative — takes priority over heuristic path)
+        this._socket.on('stvSpeechChunk', (data) => {
+          if (!data) return;
+          if (data.text && data.text.trim() && data.durationMs > 0) {
+            this._captions.onServerChunk(data.text, data.speechId, data.durationMs);
+          }
+        });
+
+        this._socket.on('stvFinishedGenerating', (data) => {
+          this._captions.onGenerationComplete(data?.speechId);
         });
 
         this._socket.on('stvStartedTalking', () => {

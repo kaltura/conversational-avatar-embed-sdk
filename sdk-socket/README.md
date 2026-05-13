@@ -277,9 +277,10 @@ const sdk = new KalturaAvatarSDK({
   turn: {
     urls: null,
     // What: TURN server URLs for WebRTC relay
-    // Default: Kaltura's TURN servers (automatically configured)
+    // Default: Auto-derived from endpoint region (e.g., 'qa' → turn.avatar.qa.kaltura.ai)
     // When to change: Only if behind a restrictive corporate firewall
     //   that blocks Kaltura's servers
+    // Example override: ['turn:my-turn.example.com:3478?transport=udp']
 
     username: 'kaltura',
     // What: TURN server authentication
@@ -821,7 +822,13 @@ sdk.isCaptionToggleVisible();        // check visibility
 
 ### Timing
 
-Segments are displayed at a default rate of 11 characters/second. After the first utterance, the SDK calibrates the rate from actual observed speaking duration using an exponential moving average. This self-tunes within 2-3 utterances to match the avatar's actual speaking pace.
+The SDK uses **dual-source timing** for caption synchronization:
+
+1. **Server-timed (primary):** When the server emits `stvSpeechChunk` events with per-chunk `durationMs`, each caption segment is displayed for its exact speaking duration. No estimation or calibration needed — timing is frame-accurate.
+
+2. **Heuristic fallback:** On servers that don't emit `stvSpeechChunk`, segments are displayed at a default rate of 11 characters/second. After the first utterance, the SDK calibrates the rate from observed speaking duration using an exponential moving average. This self-tunes within 2-3 utterances.
+
+The SDK automatically selects the appropriate timing source per response — no configuration needed.
 
 ### Caption Filters (TTS Correction)
 
