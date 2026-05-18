@@ -819,16 +819,19 @@ sdk.isCaptionToggleVisible();        // check visibility
 | `caption-segment` | `{ text, index, total, isFinal, responseId }` | Each displayable caption segment |
 | `caption-end` | `{ responseId }` | All segments emitted, speech finished |
 | `caption-interrupted` | `{ responseId, lastSegmentIndex }` | User interrupted avatar speech |
+| `generating-speech` | `{ text, speechId }` | Pre-TTS clean text (ground truth for word boundaries) |
 
 ### Timing
 
 The SDK uses **dual-source timing** for caption synchronization:
 
-1. **Server-timed (primary):** When the server emits `stvSpeechChunk` events with per-chunk `durationMs`, each caption segment is displayed for its exact speaking duration. No estimation or calibration needed — timing is frame-accurate.
+1. **Server-timed (primary):** When the server emits `stvSpeechChunk` events with per-chunk `durationMs`, each caption segment is displayed for its exact speaking duration. No estimation or calibration needed — timing is frame-accurate. Text is buffered at word boundaries to prevent mid-word splits from the TTS pipeline (which cuts at arbitrary byte positions). Partial trailing words are held until the next chunk completes them.
 
 2. **Heuristic fallback:** On servers that don't emit `stvSpeechChunk`, segments are displayed at a default rate of 11 characters/second. After the first utterance, the SDK calibrates the rate from observed speaking duration using an exponential moving average. This self-tunes within 2-3 utterances.
 
-The SDK automatically selects the appropriate timing source per response — no configuration needed.
+**Word-boundary accuracy:** When the server emits `generatingSpeech` events (clean pre-TTS text), the SDK uses this as ground truth for word boundaries in both paths. This eliminates all word-merging artifacts from byte-level TTS chunking. On servers without `generatingSpeech`, a heuristic fragment detector handles common cases.
+
+The SDK automatically selects the appropriate timing source and text source per response — no configuration needed.
 
 ### Caption Filters (TTS Correction)
 
@@ -1286,7 +1289,7 @@ connect-src: https://analytics.kaltura.com;
 ```bash
 cd sdk-socket
 npm install
-npm test                   # All standard tests (~25 seconds)
+npm test                   # All standard tests (~40 seconds)
 npm run test:analytics     # Analytics plugin tests only
 npm run test:live          # Live server integration tests
 npx playwright test tests/e2e/network-throttle.spec.js  # Network throttle tests (live)

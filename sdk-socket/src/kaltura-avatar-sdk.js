@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.6.0
+ * @version 2.7.0
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.6.0';
+  const VERSION = '2.7.0';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -1180,11 +1180,18 @@
       this._active = false;
       this._tick = null;
 
+      // Ground truth text from generatingSpeech (pre-TTS clean text)
+      this._groundTruth = new Map();
+      this._gtKey = null;
+      this._gtConsumed = 0;
+
       // Server-timed state (stvSpeechChunk path)
       this._serverTimed = false;
       this._serverQueue = [];
       this._serverTimer = null;
       this._serverSegmentIndex = 0;
+      this._serverTextBuffer = '';
+      this._serverDurationBuffer = 0;
 
       if (c.enabled === undefined && typeof localStorage !== 'undefined') {
         try {
@@ -1255,6 +1262,42 @@
       this._filter.setFilter(fn);
     }
 
+    // ── Ground truth path (generatingSpeech — pre-TTS clean text) ────────
+
+    onGeneratingSpeech(text, speechId) {
+      if (!text || !speechId) return;
+      const existing = this._groundTruth.get(speechId) || '';
+      const needsSpace = existing.length > 0 && text.length > 0 &&
+        !this._isWs(existing.charCodeAt(existing.length - 1)) &&
+        !this._isWs(text.charCodeAt(0));
+      this._groundTruth.set(speechId, existing + (needsSpace ? ' ' : '') + text);
+      if (this._groundTruth.size > 10) {
+        const first = this._groundTruth.keys().next().value;
+        if (first !== speechId) this._groundTruth.delete(first);
+      }
+    }
+
+    _isWs(code) { return code === 32 || code === 9 || code === 10 || code === 13; }
+
+    // Advance through GT text by counting non-whitespace chars in the chunk.
+    // Returns the GT slice if GT is available, or null to fall back to raw text.
+    _advanceGT(rawText) {
+      const gt = this._gtKey ? this._groundTruth.get(this._gtKey) : null;
+      if (!gt || gt.length <= this._gtConsumed) return null;
+      const deltaLen = rawText.replace(/\s+/g, '').length;
+      let matched = 0;
+      let end = this._gtConsumed;
+      while (matched < deltaLen && end < gt.length) {
+        if (!this._isWs(gt.charCodeAt(end))) matched++;
+        end++;
+      }
+      const slice = gt.slice(this._gtConsumed, end);
+      this._gtConsumed = end;
+      return slice;
+    }
+
+    // ── Heuristic path (debug_stvTaskGenerated fallback) with GT overlay ─
+
     onChunk(text, speechId) {
       if (!this._enabled) return;
       if (!text || !text.trim()) return;
@@ -1279,9 +1322,35 @@
           this._active = true;
           this._emitter.emit(Events.CAPTION_START, { responseId: this._responseId });
         }
+        this._gtKey = rid;
+        this._gtConsumed = 0;
       }
 
-      this._textBuffer += text;
+      const gtSlice = this._advanceGT(text);
+      if (gtSlice !== null) {
+        this._textBuffer = this._groundTruth.get(this._gtKey).slice(0, this._gtConsumed);
+      } else {
+        // Fallback: heuristic space insertion at chunk boundaries
+        if (this._textBuffer.length > 0 && text.length > 0) {
+          const lc = this._textBuffer.charCodeAt(this._textBuffer.length - 1);
+          const fc = text.charCodeAt(0);
+          if (!this._isWs(lc) && !this._isWs(fc)) {
+            let tailLen = 0;
+            for (let i = this._textBuffer.length - 1; i >= 0; i--) {
+              if (this._isWs(this._textBuffer.charCodeAt(i))) break;
+              tailLen++;
+            }
+            let headLen = 0;
+            if (fc >= 97 && fc <= 122) {
+              while (headLen < text.length && text.charCodeAt(headLen) >= 97 && text.charCodeAt(headLen) <= 122) headLen++;
+            }
+            const tailIsFragment = (tailLen <= 2) && (lc >= 65 && lc <= 122) && (fc >= 97 && fc <= 122);
+            const headIsSuffix = (headLen > 0 && headLen <= 2);
+            if (!(tailIsFragment || headIsSuffix)) this._textBuffer += ' ';
+          }
+        }
+        this._textBuffer += text;
+      }
       this._appendNewSegments();
     }
 
@@ -1296,27 +1365,77 @@
 
       const rid = speechId || this._responseId || this._generateId();
 
-      if (rid !== this._responseId) {
+      if (rid !== this._responseId || !this._active) {
         if (this._active) this._interruptServer();
         this._responseId = rid;
         this._serverTimed = true;
         this._serverQueue = [];
         this._serverSegmentIndex = 0;
+        this._serverTextBuffer = '';
+        this._serverDurationBuffer = 0;
         this._active = true;
+        this._gtKey = rid;
+        this._gtConsumed = 0;
+        this._stopTick();
         this._emitter.emit(Events.CAPTION_START, { responseId: this._responseId });
-      }
-
-      if (!this._serverTimed) {
+      } else if (!this._serverTimed) {
         this._serverTimed = true;
+        this._gtConsumed = 0;
+        this._serverTextBuffer = '';
+        this._serverDurationBuffer = 0;
+        this._serverQueue = [];
+        this._serverSegmentIndex = 0;
         this._stopTick();
       }
 
-      const segments = this._segmenter.segment(text);
+      const dur = (typeof durationMs === 'number' && isFinite(durationMs) && durationMs > 0) ? durationMs : 100;
+
+      const gtSlice = this._advanceGT(text);
+      this._serverTextBuffer += (gtSlice !== null) ? gtSlice : text;
+
+      this._serverDurationBuffer += dur;
+      this._commitServerBuffer(false);
+    }
+
+    // Commit buffered text up to the last word boundary (whitespace). Holds trailing
+    // partial words until the next chunk completes them. flush=true commits everything
+    // (used on generation-complete and speaking-end). Duration is redistributed
+    // proportionally — total committed always equals total received.
+    _commitServerBuffer(flush) {
+      if (!this._serverTextBuffer) return;
+
+      let commitText, commitDuration;
+
+      if (flush || this._serverTextBuffer.length > 2000) {
+        commitText = this._serverTextBuffer;
+        commitDuration = this._serverDurationBuffer;
+        this._serverTextBuffer = '';
+        this._serverDurationBuffer = 0;
+      } else {
+        let boundary = -1;
+        for (let i = this._serverTextBuffer.length - 1; i >= 0; i--) {
+          const ch = this._serverTextBuffer.charCodeAt(i);
+          if (ch === 32 || ch === 9 || ch === 10 || ch === 13) { boundary = i; break; }
+        }
+        if (boundary < 0) return;
+
+        const commitEnd = boundary + 1;
+        commitText = this._serverTextBuffer.slice(0, commitEnd);
+        const totalLen = this._serverTextBuffer.length;
+        commitDuration = totalLen > 0 ? Math.round((commitEnd / totalLen) * this._serverDurationBuffer) : this._serverDurationBuffer;
+
+        this._serverTextBuffer = this._serverTextBuffer.slice(commitEnd);
+        this._serverDurationBuffer = this._serverDurationBuffer - commitDuration;
+      }
+
+      if (!commitText.trim()) return;
+
+      const segments = this._segmenter.segment(commitText.trim());
       if (segments.length === 0) return;
 
       const totalChars = segments.reduce((sum, s) => sum + s.length, 0);
       for (const seg of segments) {
-        const segDuration = totalChars > 0 ? Math.round((seg.length / totalChars) * durationMs) : durationMs;
+        const segDuration = totalChars > 0 ? Math.round((seg.length / totalChars) * commitDuration) : commitDuration;
         this._serverQueue.push({ text: seg, durationMs: segDuration });
       }
 
@@ -1328,7 +1447,7 @@
     onGenerationComplete(speechId) {
       if (!this._enabled || !this._active) return;
       if (speechId && speechId !== this._responseId) return;
-      // All server chunks received — queue will drain naturally via timers
+      this._commitServerBuffer(true);
     }
 
     _drainServerQueue() {
@@ -1372,6 +1491,8 @@
       this._serverTimed = false;
       this._serverQueue = [];
       this._serverSegmentIndex = 0;
+      this._serverTextBuffer = '';
+      this._serverDurationBuffer = 0;
       if (this._serverTimer) { clearTimeout(this._serverTimer); this._serverTimer = null; }
     }
 
@@ -1401,9 +1522,10 @@
         return;
       }
 
-      // Server-timed path: let the queue drain on its own timers, then emit end
+      // Server-timed path: flush remaining buffer, let queue drain, then emit end
       if (this._serverTimed) {
         this._speaking = false;
+        this._commitServerBuffer(true);
         // Calibrate rate for future fallback use
         if (this._speakingStartTime > 0 && fullText) {
           const duration = Date.now() - this._speakingStartTime;
@@ -1442,10 +1564,10 @@
           this._show(i);
         }
       } else if (this._active) {
-        // Flush remaining uncommitted text from our own buffer
+        // Flush remaining uncommitted text from our buffer
         const tail = this._textBuffer.slice(this._commitBoundary);
         if (tail.trim()) {
-          const finalSegs = this._segmenter.segment(tail);
+          const finalSegs = this._segmenter.segment(tail.trim());
           for (const seg of finalSegs) this._segments.push(seg);
           this._commitBoundary = this._textBuffer.length;
         }
@@ -1575,6 +1697,9 @@
       this._displayedLen = 0;
       this._speakingStartTime = 0;
       this._speaking = false;
+      this._gtKey = null;
+      this._gtConsumed = 0;
+      this._groundTruth.clear();
       this._stopTick();
       this._resetServer();
     }
@@ -3640,6 +3765,15 @@
           if (data.text && data.text.trim() && data.durationMs > 0) {
             this._captions.onServerChunk(data.text, data.speechId, data.durationMs);
           }
+        });
+
+        // generatingSpeech: clean text sent to TTS (before byte-level chunking).
+        // Feeds ground truth to CaptionManager for accurate word boundaries.
+        this._socket.on('generatingSpeech', (data) => {
+          if (data?.text && data?.speechId) {
+            this._captions.onGeneratingSpeech(data.text, data.speechId);
+          }
+          this._emitter.emit('generating-speech', { text: data?.text, speechId: data?.speechId });
         });
 
         this._socket.on('stvFinishedGenerating', (data) => {

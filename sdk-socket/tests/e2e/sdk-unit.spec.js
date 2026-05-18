@@ -2248,19 +2248,25 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     expect(result).toBe(true);
   });
 
-  test('onServerChunk emits caption-segment immediately', async () => {
+  test('onServerChunk emits caption-segment after word boundary or flush', async () => {
     const result = await page.evaluate(() => {
-      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
-      const emitter = new TypedEventEmitter();
-      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
-      const segments = [];
-      emitter.on('caption-segment', (p) => { segments.push(p); });
-      cm.onServerChunk('Hello world.', 'sp-1', 1500);
-      cm.destroy();
-      return { count: segments.length, text: segments[0]?.text, responseId: segments[0]?.responseId };
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p); });
+        cm.onServerChunk('Hello world.', 'sp-1', 1500);
+        cm.onGenerationComplete('sp-1');
+        setTimeout(() => {
+          cm.destroy();
+          resolve({ count: segments.length, texts: segments.map(s => s.text), responseId: segments[0]?.responseId });
+        }, 2000);
+      });
     });
-    expect(result.count).toBe(1);
-    expect(result.text).toBe('Hello world.');
+    expect(result.count).toBeGreaterThanOrEqual(2);
+    expect(result.texts.join(' ')).toContain('Hello');
+    expect(result.texts.join(' ')).toContain('world.');
     expect(result.responseId).toBe('sp-1');
   });
 
@@ -2306,8 +2312,8 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
         const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
         const segments = [];
         emitter.on('caption-segment', (p) => { segments.push(p.text); });
-        // Activate server-timed path
-        cm.onServerChunk('Hello from server.', 'sp-1', 1000);
+        // Activate server-timed path (trailing space ensures immediate commit)
+        cm.onServerChunk('Hello from server. ', 'sp-1', 1000);
         // This should be a no-op in server-timed mode
         cm.onSpeakingStart();
         setTimeout(() => {
@@ -2329,16 +2335,18 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
         const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
         const segments = [];
         emitter.on('caption-segment', (p) => { segments.push(p.text); });
-        cm.onServerChunk('First chunk.', 'sp-1', 500);
+        cm.onServerChunk('First chunk. ', 'sp-1', 500);
         cm.onServerChunk('Second chunk.', 'sp-1', 500);
+        cm.onGenerationComplete('sp-1');
         setTimeout(() => {
           cm.destroy();
           resolve(segments);
-        }, 1200);
+        }, 1500);
       });
     });
-    expect(result).toContain('First chunk.');
-    expect(result).toContain('Second chunk.');
+    const joined = result.join(' ');
+    expect(joined).toContain('First chunk.');
+    expect(joined).toContain('Second chunk.');
   });
 
   test('onServerChunk ignores empty text (sentinel chunks)', async () => {
@@ -2359,16 +2367,23 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
 
   test('onServerChunk strips SSML tags', async () => {
     const result = await page.evaluate(() => {
-      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
-      const emitter = new TypedEventEmitter();
-      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
-      let text = '';
-      emitter.on('caption-segment', (p) => { text = p.text; });
-      cm.onServerChunk('<speak>Hello <break time="200ms"/>world.</speak>', 'sp-1', 1000);
-      cm.destroy();
-      return text;
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const texts = [];
+        emitter.on('caption-segment', (p) => { texts.push(p.text); });
+        cm.onServerChunk('<speak>Hello <break time="200ms"/>world.</speak>', 'sp-1', 1000);
+        cm.onGenerationComplete('sp-1');
+        setTimeout(() => {
+          cm.destroy();
+          resolve(texts.join(' '));
+        }, 1500);
+      });
     });
-    expect(result).toBe('Hello world.');
+    expect(result).toContain('Hello');
+    expect(result).toContain('world.');
+    expect(result).not.toContain('<');
   });
 
   test('interrupt clears server-timed queue', async () => {
@@ -2380,8 +2395,8 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
         const events = [];
         emitter.on('caption-segment', (p) => { events.push('seg:' + p.text); });
         emitter.on('caption-interrupted', () => { events.push('interrupted'); });
-        cm.onServerChunk('First.', 'sp-1', 2000);
-        cm.onServerChunk('Second.', 'sp-1', 2000);
+        cm.onServerChunk('First. ', 'sp-1', 2000);
+        cm.onServerChunk('Second. ', 'sp-1', 2000);
         // Interrupt after first segment shows but before second
         setTimeout(() => {
           cm.interrupt();
@@ -2497,16 +2512,21 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
 
   test('onServerChunk applies CaptionFilter (replacements)', async () => {
     const result = await page.evaluate(() => {
-      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
-      const emitter = new TypedEventEmitter();
-      const cm = new CaptionManager(emitter, { enabled: true, render: false, replacements: { 'Kaltura': 'Kal-tura' } }, { debug() {}, info() {}, warn() {}, error() {} });
-      let text = '';
-      emitter.on('caption-segment', (p) => { text = p.text; });
-      cm.onServerChunk('Welcome to Kaltura.', 'sp-1', 1000);
-      cm.destroy();
-      return text;
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false, replacements: { 'Kaltura': 'Kal-tura' } }, { debug() {}, info() {}, warn() {}, error() {} });
+        const texts = [];
+        emitter.on('caption-segment', (p) => { texts.push(p.text); });
+        cm.onServerChunk('Welcome to Kaltura.', 'sp-1', 1000);
+        cm.onGenerationComplete('sp-1');
+        setTimeout(() => {
+          cm.destroy();
+          resolve(texts.join(' '));
+        }, 1500);
+      });
     });
-    expect(result).toBe('Welcome to Kal-tura.');
+    expect(result).toContain('Kal-tura.');
   });
 
   test('onGenerationComplete is safe with mismatched speechId', async () => {
@@ -2531,8 +2551,8 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
         const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
         const segments = [];
         emitter.on('caption-segment', (p) => { segments.push(p.text); });
-        cm.onServerChunk('First.', 'sp-1', 500);
-        cm.onServerChunk('Second.', 'sp-1', 500);
+        cm.onServerChunk('First. ', 'sp-1', 500);
+        cm.onServerChunk('Second. ', 'sp-1', 500);
         // Destroy immediately — should stop further segment emissions
         setTimeout(() => {
           const countBefore = segments.length;
@@ -2556,9 +2576,9 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
         const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
         const indexes = [];
         emitter.on('caption-segment', (p) => { indexes.push(p.index); });
-        cm.onServerChunk('First chunk.', 'sp-1', 200);
-        cm.onServerChunk('Second chunk.', 'sp-1', 200);
-        cm.onServerChunk('Third chunk.', 'sp-1', 200);
+        cm.onServerChunk('First chunk. ', 'sp-1', 200);
+        cm.onServerChunk('Second chunk. ', 'sp-1', 200);
+        cm.onServerChunk('Third chunk. ', 'sp-1', 200);
         setTimeout(() => {
           cm.destroy();
           resolve(indexes);
@@ -2566,6 +2586,449 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
       });
     });
     expect(result).toEqual([0, 1, 2]);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // SERVER-TIMED WORD-BOUNDARY BUFFERING
+  // ────────────────────────────────────────────────────────────────────
+
+  test('word-boundary buffering holds partial words until space arrives', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        cm.onServerChunk('B', 'sp-1', 200);
+        // No space yet — nothing should be emitted
+        const afterFirst = segments.length;
+        cm.onServerChunk('2 level, ', 'sp-1', 400);
+        setTimeout(() => {
+          cm.destroy();
+          resolve({ afterFirst, segments });
+        }, 100);
+      });
+    });
+    expect(result.afterFirst).toBe(0);
+    expect(result.segments.length).toBeGreaterThan(0);
+    expect(result.segments.join(' ')).toContain('B2');
+  });
+
+  test('word-boundary buffering commits at trailing space', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        cm.onServerChunk('Hello world ', 'sp-1', 500);
+        setTimeout(() => {
+          cm.destroy();
+          resolve(segments);
+        }, 100);
+      });
+    });
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.join(' ')).toContain('Hello');
+    expect(result.join(' ')).toContain('world');
+  });
+
+  test('word-boundary buffering flushes on onGenerationComplete', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        // Single word with no space — cannot commit until flush
+        cm.onServerChunk('goodbye', 'sp-1', 300);
+        const beforeFlush = segments.length;
+        cm.onGenerationComplete('sp-1');
+        setTimeout(() => {
+          cm.destroy();
+          resolve({ beforeFlush, segments });
+        }, 100);
+      });
+    });
+    expect(result.beforeFlush).toBe(0);
+    expect(result.segments.join(' ')).toContain('goodbye');
+  });
+
+  test('word-boundary buffering preserves total duration', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const durations = [];
+        // Monkey-patch _drainServerQueue to capture durations without waiting
+        const origDrain = cm._drainServerQueue.bind(cm);
+        cm._drainServerQueue = function() {
+          while (this._serverQueue.length > 0) {
+            const item = this._serverQueue.shift();
+            durations.push(item.durationMs);
+            this._serverSegmentIndex++;
+          }
+          this._serverTimer = null;
+        };
+        cm.onServerChunk('half ', 'sp-1', 200);
+        cm.onServerChunk('text', 'sp-1', 200);
+        cm.onGenerationComplete('sp-1');
+        resolve(durations);
+      });
+    });
+    const total = result.reduce((s, d) => s + d, 0);
+    expect(total).toBe(400);
+  });
+
+  test('word-boundary buffering clears on new speechId (interrupt)', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        cm.onServerChunk('parti', 'sp-1', 100);
+        // New speechId arrives — old buffer must be discarded
+        cm.onServerChunk('New sentence. ', 'sp-2', 500);
+        setTimeout(() => {
+          cm.destroy();
+          resolve(segments);
+        }, 100);
+      });
+    });
+    // "parti" should NOT appear — it was discarded on interrupt
+    const joined = result.join(' ');
+    expect(joined).not.toContain('parti');
+    expect(joined).toContain('New sentence.');
+  });
+
+  test('word-boundary buffering keeps punctuation attached to word', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        cm.onServerChunk('level,', 'sp-1', 200);
+        cm.onServerChunk(' next', 'sp-1', 200);
+        cm.onGenerationComplete('sp-1');
+        setTimeout(() => {
+          cm.destroy();
+          resolve(segments);
+        }, 100);
+      });
+    });
+    const joined = result.join(' ');
+    // Comma must stay with "level"
+    expect(joined).toContain('level,');
+  });
+
+  test('word-boundary buffering handles consecutive no-space chunks', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        cm.onServerChunk('ou', 'sp-1', 100);
+        cm.onServerChunk('r ', 'sp-1', 100);
+        setTimeout(() => {
+          cm.destroy();
+          resolve(segments);
+        }, 100);
+      });
+    });
+    const joined = result.join(' ');
+    expect(joined).toContain('our');
+  });
+
+  test('word-boundary buffering force-flushes at 2000 chars (CJK safety valve)', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        // Send text with no spaces exceeding 2000 chars
+        const longText = 'あ'.repeat(2100);
+        cm.onServerChunk(longText, 'sp-1', 5000);
+        setTimeout(() => {
+          cm.destroy();
+          resolve({ segments, totalLen: segments.join('').length });
+        }, 100);
+      });
+    });
+    // Should have force-flushed despite no whitespace boundary
+    expect(result.segments.length).toBeGreaterThan(0);
+    expect(result.totalLen).toBe(2100);
+  });
+
+  test('word-boundary buffering clamps invalid durationMs to 100', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const durations = [];
+        const origDrain = cm._drainServerQueue.bind(cm);
+        cm._drainServerQueue = function() {
+          while (this._serverQueue.length > 0) {
+            const item = this._serverQueue.shift();
+            durations.push(item.durationMs);
+            this._serverSegmentIndex++;
+          }
+          this._serverTimer = null;
+        };
+        cm.onServerChunk('hello ', 'sp-1', NaN);
+        cm.onServerChunk('world', 'sp-1', -5);
+        cm.onGenerationComplete('sp-1');
+        resolve(durations);
+      });
+    });
+    const total = result.reduce((s, d) => s + d, 0);
+    // NaN and -5 should both be clamped to 100, total = 200
+    expect(total).toBe(200);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // GROUND TRUTH (generatingSpeech) CAPTION PATH
+  // ────────────────────────────────────────────────────────────────────
+
+  test('GT path uses generatingSpeech text as buffer instead of heuristic', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      cm.onGeneratingSpeech('Hello world, welcome to the platform.', 'sp-1');
+      cm.onChunk('Hello wor', 'sp-1');
+      cm.onChunk('ld, welco', 'sp-1');
+      cm.onChunk('me to the platfor', 'sp-1');
+      cm.onChunk('m.', 'sp-1');
+      const buf = cm._textBuffer;
+      cm.destroy();
+      return buf;
+    });
+    expect(result).toBe('Hello world, welcome to the platform.');
+  });
+
+  test('GT path handles multiple generatingSpeech events for same speechId', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      cm.onGeneratingSpeech('First sentence. ', 'sp-1');
+      cm.onGeneratingSpeech('Second sentence.', 'sp-1');
+      cm.onChunk('First sent', 'sp-1');
+      cm.onChunk('ence. Second sente', 'sp-1');
+      cm.onChunk('nce.', 'sp-1');
+      const buf = cm._textBuffer;
+      cm.destroy();
+      return buf;
+    });
+    expect(result).toBe('First sentence. Second sentence.');
+  });
+
+  test('GT path inserts space between GT events without whitespace boundaries', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      cm.onGeneratingSpeech('Great!', 'sp-1');
+      cm.onGeneratingSpeech('Now let us begin.', 'sp-1');
+      cm.onChunk('Great!Now let us beg', 'sp-1');
+      cm.onChunk('in.', 'sp-1');
+      const buf = cm._textBuffer;
+      cm.destroy();
+      return buf;
+    });
+    expect(result).toBe('Great! Now let us begin.');
+  });
+
+  test('GT server-timed path uses GT for correct word boundaries', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        cm.onGeneratingSpeech('Great!', 'sp-1');
+        cm.onGeneratingSpeech('You are a guest at our hotel.', 'sp-1');
+        const gtText = cm._groundTruth.get('sp-1');
+        cm.onServerChunk('Great!', 'sp-1', 500);
+        cm.onServerChunk('You are a', 'sp-1', 800);
+        cm.onServerChunk('guest at our hotel.', 'sp-1', 1000);
+        cm.onGenerationComplete('sp-1');
+        setTimeout(() => {
+          const joined = segments.join(' ');
+          cm.destroy();
+          resolve({ segments, joined, gtText });
+        }, 2500);
+      });
+    });
+    expect(result.gtText).toBe('Great! You are a guest at our hotel.');
+    expect(result.joined).not.toContain('aguest');
+    expect(result.joined).toContain('a guest');
+  });
+
+  test('GT path falls back to heuristic when no GT available', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      cm.onChunk('Hello', 'sp-no-gt');
+      cm.onChunk('world', 'sp-no-gt');
+      const buf = cm._textBuffer;
+      cm.destroy();
+      return buf;
+    });
+    expect(result).toBe('Hello world');
+  });
+
+  test('GT path falls back to heuristic for mismatched speechId', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      cm.onGeneratingSpeech('Wrong speech text.', 'sp-other');
+      cm.onChunk('Hello', 'sp-1');
+      cm.onChunk('world', 'sp-1');
+      const buf = cm._textBuffer;
+      cm.destroy();
+      return buf;
+    });
+    expect(result).toBe('Hello world');
+  });
+
+  test('GT path resets on new speechId (new response)', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      cm.onGeneratingSpeech('First response.', 'sp-1');
+      cm.onGeneratingSpeech('Second response.', 'sp-2');
+      cm.onChunk('First res', 'sp-1');
+      cm.onChunk('ponse.', 'sp-1');
+      cm.onChunk('Second res', 'sp-2');
+      cm.onChunk('ponse.', 'sp-2');
+      const buf = cm._textBuffer;
+      cm.destroy();
+      return buf;
+    });
+    expect(result).toBe('Second response.');
+  });
+
+  test('GT path advances correctly through whitespace-heavy text', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      cm.onGeneratingSpeech('A  B  C', 'sp-1');
+      cm.onChunk('AB', 'sp-1');
+      cm.onChunk('C', 'sp-1');
+      const buf = cm._textBuffer;
+      cm.destroy();
+      return buf;
+    });
+    expect(result).toBe('A  B  C');
+  });
+
+  test('GT map is cleaned up on _reset', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      cm.onGeneratingSpeech('Some text.', 'sp-1');
+      cm._reset();
+      const res = { mapSize: cm._groundTruth.size, key: cm._gtKey, consumed: cm._gtConsumed };
+      cm.destroy();
+      return res;
+    });
+    expect(result).toEqual({ mapSize: 0, key: null, consumed: 0 });
+  });
+
+  test('GT map evicts old entries when exceeding 10', async () => {
+    const result = await page.evaluate(() => {
+      const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+      const emitter = new TypedEventEmitter();
+      const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+      for (let i = 0; i < 12; i++) {
+        cm.onGeneratingSpeech('Text ' + i, 'sp-' + i);
+      }
+      const res = { mapSize: cm._groundTruth.size, hasFirst: cm._groundTruth.has('sp-0') };
+      cm.destroy();
+      return res;
+    });
+    expect(result.mapSize).toBeLessThanOrEqual(11);
+    expect(result.hasFirst).toBe(false);
+  });
+
+  test('GT cursor resets when server-timed path takes over from heuristic', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        // GT arrives first
+        cm.onGeneratingSpeech('Are you still there? I\'m ready when you are to start.', 'sp-race');
+        // Heuristic path fires (debug_stvTaskGenerated arrives before stvSpeechChunk)
+        cm.onChunk('Are you still there?', 'sp-race');
+        // Server-timed takes over — must reset GT cursor to 0
+        cm.onServerChunk('Are you still there?', 'sp-race', 800);
+        cm.onServerChunk("I'm ready when you are to start.", 'sp-race', 1200);
+        cm.onGenerationComplete('sp-race');
+        setTimeout(() => {
+          const joined = segments.join(' ');
+          cm.destroy();
+          resolve({ segments, joined });
+        }, 2500);
+      });
+    });
+    // Must contain the beginning "Are you still there?" — not skip it
+    expect(result.joined).toContain('Are you still there');
+    expect(result.joined).toContain('ready when you are');
+  });
+
+  test('GT reinitializes when server chunks continue after heuristic reset', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CaptionManager, TypedEventEmitter } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cm = new CaptionManager(emitter, { enabled: true, render: false }, { debug() {}, info() {}, warn() {}, error() {} });
+        const segments = [];
+        emitter.on('caption-segment', (p) => { segments.push(p.text); });
+        // GT for first sentence
+        cm.onGeneratingSpeech('Great!', 'sp-split');
+        // Heuristic handles "Great!" and then speaking ends (reset)
+        cm.onChunk('Great!', 'sp-split');
+        cm.onSpeakingStart();
+        cm.onSpeakingEnd('Great!', 'sp-split');
+        // GT for continuation arrives
+        cm.onGeneratingSpeech('Before we start the role-play, I will show you a video.', 'sp-split');
+        // Server chunks now arrive for same speechId after reset
+        cm.onServerChunk('Before we start the role-play,', 'sp-split', 600);
+        cm.onServerChunk('I will show you a video.', 'sp-split', 800);
+        cm.onGenerationComplete('sp-split');
+        setTimeout(() => {
+          const joined = segments.join(' ');
+          cm.destroy();
+          resolve({ segments, joined });
+        }, 2500);
+      });
+    });
+    expect(result.joined).toContain('Before we start');
+    expect(result.joined).not.toContain('thevideo');
+    expect(result.joined).not.toContain('therole');
   });
 
   // ────────────────────────────────────────────────────────────────────

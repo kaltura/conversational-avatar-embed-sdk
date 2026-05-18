@@ -372,6 +372,11 @@ export interface TimeWarningPayload {
   remainingSeconds: number;
 }
 
+export interface GeneratingSpeechPayload {
+  text: string;
+  speechId: string;
+}
+
 export interface ServerFeatures {
   tapToTalk: boolean;
   interruptions: boolean;
@@ -464,6 +469,8 @@ export interface AvatarEventMap {
   'queue-position-check': QueuePositionCheckPayload;
   'queue-available': {};
   'queue-timeout': QueueTimeoutPayload;
+
+  'generating-speech': GeneratingSpeechPayload;
 
   'reconnecting': ReconnectingPayload;
   'reconnected': void;

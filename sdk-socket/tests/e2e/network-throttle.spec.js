@@ -83,81 +83,70 @@ test.describe('KalturaAvatarSDK — Network Throttle (Live)', () => {
   });
 
   test('SDK recovers when network drops and returns mid-session', async ({ page }) => {
+    test.setTimeout(120000);
     await page.goto('/tests/e2e/test-runner.html');
     await page.waitForFunction(() => typeof window.KalturaAvatarSDK !== 'undefined');
 
     const cdp = await page.context().newCDPSession(page);
 
-    const result = await page.evaluate(async ({ clientId, flowId }) => {
-      return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          sdk.destroy();
-          resolve({ phase: 'timeout', events });
-        }, 90000);
+    // Phase 1: Start the SDK (non-blocking) and wait for greeting
+    await page.evaluate(({ clientId, flowId }) => {
+      window.__netTest = { events: [], phase: 'connecting' };
+      const state = window.__netTest;
 
-        const events = [];
-        let phase = 'connecting';
-        const sdk = new KalturaAvatarSDK({
-          clientId,
-          flowId,
-          container: '#test-container',
-          connectionTimeout: 20000,
-          autoReconnect: true,
-          debug: true
-        });
+      const sdk = new KalturaAvatarSDK({
+        clientId,
+        flowId,
+        container: '#test-container',
+        connectionTimeout: 20000,
+        autoReconnect: true,
+        debug: true
+      });
+      window.__netTestSdk = sdk;
 
-        sdk.on('state-change', ({ from, to }) => events.push(`${phase}:${from}→${to}`));
-        sdk.on('ready', () => events.push(`${phase}:READY`));
-        sdk.on('disconnected', (d) => events.push(`${phase}:DISCONNECTED:${d?.reason || 'unknown'}`));
-        sdk.on('reconnecting', (d) => events.push(`${phase}:RECONNECTING:${d.attempt}`));
-        sdk.on('reconnected', () => events.push(`${phase}:RECONNECTED`));
-        sdk.on('error', (err) => events.push(`${phase}:ERR:${err.code}`));
+      sdk.on('state-change', ({ from, to }) => state.events.push(`${state.phase}:${from}→${to}`));
+      sdk.on('ready', () => state.events.push(`${state.phase}:READY`));
+      sdk.on('disconnected', (d) => state.events.push(`${state.phase}:DISCONNECTED:${d?.reason || 'unknown'}`));
+      sdk.on('reconnecting', (d) => state.events.push(`${state.phase}:RECONNECTING:${d.attempt}`));
+      sdk.on('reconnected', () => {
+        state.events.push(`${state.phase}:RECONNECTED`);
+        state.phase = 'recovered';
+        setTimeout(() => {
+          try { sdk.sendText('Are you there?'); } catch (e) { state.events.push(`SEND_ERR:${e.message}`); }
+        }, 2000);
+      });
+      sdk.on('error', (err) => state.events.push(`${state.phase}:ERR:${err.code}`));
+      sdk.on('avatar-speech', ({ text }) => {
+        if (state.phase === 'connecting') {
+          state.events.push('GOT_GREETING');
+          state.phase = 'will-drop';
+        } else if (state.phase === 'recovered') {
+          state.events.push('GOT_RESPONSE_AFTER_RECOVERY');
+          state.phase = 'complete';
+        }
+      });
 
-        sdk.on('avatar-speech', ({ text }) => {
-          if (phase === 'connecting') {
-            events.push('GOT_GREETING');
-            phase = 'will-drop';
-            // Signal to the outer test to kill the network
-            window.__sdkReadyForDrop = true;
-          } else if (phase === 'recovered') {
-            events.push('GOT_RESPONSE_AFTER_RECOVERY');
-            clearTimeout(timeout);
-            sdk.destroy();
-            resolve({ phase: 'complete', events });
-          }
-        });
-
-        // Listen for reconnection success
-        sdk.on('reconnected', () => {
-          phase = 'recovered';
-          events.push('RECOVERY_CONFIRMED');
-          // After reconnect, send text to verify the session works
-          setTimeout(() => {
-            try { sdk.sendText('Are you there?'); } catch (e) { events.push(`SEND_ERR:${e.message}`); }
-          }, 2000);
-        });
-
-        window.__sdkReadyForDrop = false;
-        sdk.connect().catch(err => {
-          clearTimeout(timeout);
-          resolve({ phase: 'connect-failed', events, error: err.message });
-        });
+      sdk.connect().catch(err => {
+        state.events.push(`CONNECT_FAILED:${err.message}`);
+        state.phase = 'connect-failed';
       });
     }, { clientId: CLIENT_ID, flowId: FLOW_ID });
 
-    // If SDK connected, simulate network drop
-    if (result.phase === 'timeout' || result.phase === 'connect-failed') {
-      // Connection itself failed — still valid test, just skip the drop phase
+    // Wait for greeting (SDK connected and avatar spoke)
+    const gotGreeting = await page.waitForFunction(
+      () => window.__netTest && (window.__netTest.phase === 'will-drop' || window.__netTest.phase === 'connect-failed'),
+      { timeout: 40000 }
+    ).then(() => true).catch(() => false);
+
+    const phase1 = await page.evaluate(() => window.__netTest);
+    if (!gotGreeting || phase1.phase === 'connect-failed') {
       await cdp.detach();
-      // Soft-pass: we at least verified the SDK didn't crash
-      expect(result.events.length).toBeGreaterThan(0);
+      await page.evaluate(() => { if (window.__netTestSdk) window.__netTestSdk.destroy(); });
+      expect(phase1.events.length).toBeGreaterThan(0);
       return;
     }
 
-    // Wait for SDK to be ready for the drop
-    await page.waitForFunction(() => window.__sdkReadyForDrop === true, { timeout: 30000 });
-
-    // Kill the network
+    // Phase 2: Drop the network
     await cdp.send('Network.emulateNetworkConditions', {
       offline: true,
       downloadThroughput: 0,
@@ -165,10 +154,10 @@ test.describe('KalturaAvatarSDK — Network Throttle (Live)', () => {
       latency: 0
     });
 
-    // Wait 5 seconds (simulates brief offline period)
+    await page.evaluate(() => { window.__netTest.phase = 'dropped'; });
     await page.waitForTimeout(5000);
 
-    // Bring network back
+    // Phase 3: Restore the network
     await cdp.send('Network.emulateNetworkConditions', {
       offline: false,
       downloadThroughput: -1,
@@ -176,33 +165,29 @@ test.describe('KalturaAvatarSDK — Network Throttle (Live)', () => {
       latency: 0
     });
 
-    // Wait for reconnection to happen (up to 30s)
-    const finalResult = await page.evaluate(() => {
-      return new Promise(resolve => {
-        const check = setInterval(() => {
-          if (window.__sdkReadyForDrop === 'done') {
-            clearInterval(check);
-            resolve('done');
-          }
-        }, 500);
-        setTimeout(() => {
-          clearInterval(check);
-          resolve('timeout');
-        }, 30000);
-      });
+    // Phase 4: Wait for reconnection or timeout
+    const recovered = await page.waitForFunction(
+      () => window.__netTest && (window.__netTest.phase === 'complete' || window.__netTest.phase === 'recovered'),
+      { timeout: 45000 }
+    ).then(() => true).catch(() => false);
+
+    // Collect final state
+    const finalState = await page.evaluate(() => {
+      const state = window.__netTest;
+      if (window.__netTestSdk) window.__netTestSdk.destroy();
+      return state;
     });
 
     await cdp.detach();
 
-    // The key assertion: SDK either reconnected successfully or at least
-    // attempted reconnection without crashing
-    const events = await page.evaluate(() => {
-      // Retrieve events stored on window if available
-      return document.title; // Placeholder — actual events are in the result above
-    });
-
-    // At minimum, the SDK must not crash during offline → online transition
-    expect(result.events).toContain('GOT_GREETING');
+    // Assertions: SDK must get the greeting and not crash
+    expect(finalState.events).toContain('GOT_GREETING');
+    if (recovered) {
+      expect(finalState.events.some(e => e.includes('RECONNECTED'))).toBe(true);
+    } else {
+      // Even without full recovery, verify reconnection was attempted
+      expect(finalState.events.some(e => e.includes('RECONNECTING') || e.includes('DISCONNECTED'))).toBe(true);
+    }
   });
 
   test('high latency (2000ms RTT) does not prevent connection', async ({ page }) => {

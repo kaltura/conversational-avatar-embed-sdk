@@ -11,7 +11,7 @@ This guide covers **both** SDKs. Choose one based on your needs:
 | | **Socket SDK** (recommended) | **Iframe SDK** (simple) |
 |---|---|---|
 | **Control** | Full — you own the video, events, GenUI rendering | Minimal — sandboxed iframe |
-| **Size** | ~157KB + Socket.IO | ~6KB, zero deps |
+| **Size** | ~170KB + Socket.IO | ~6KB, zero deps |
 | **Integration** | Direct socket + WebRTC | Iframe + postMessage |
 | **Docs** | [Socket README](sdk-socket/README.md) | This file (below) |
 

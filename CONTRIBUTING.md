@@ -133,7 +133,7 @@ Tests run in Chromium via Playwright. Each test creates a fresh SDK instance wit
 ```bash
 cd sdk-socket
 npm install              # First time only
-npm test                 # All standard tests, ~25 seconds
+npm test                 # All standard tests, ~40 seconds
 npm run test:live        # Live server tests (needs credentials)
 npm run test:all         # Everything
 ```

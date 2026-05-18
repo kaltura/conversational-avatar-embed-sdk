@@ -221,23 +221,27 @@ stvSpeechChunk { text, speechId, durationMs }   ← committed chunk with exact d
        ▼
 CaptionManager.onServerChunk(text, speechId, durationMs)
   • Strip SSML tags, ignore empty sentinels (text="" durationMs=1)
-  • If new speechId: interrupt previous, emit 'caption-start'
-  • Segment text (respecting maxCharsPerLine/maxLines)
-  • Distribute durationMs proportionally across segments by char count
-  • Queue segments with scheduled timers for sequential display
-  • First segment shows immediately, subsequent show after their duration elapses
+  • If new speechId OR session inactive: interrupt previous, emit 'caption-start'
+  • If heuristic was active (first server chunk): reset GT cursor + server state, take over
+  • Append text → _serverTextBuffer, durationMs → _serverDurationBuffer
+  • _commitServerBuffer(false):
+    – Find last whitespace in buffer (word boundary)
+    – If found: commit text up to boundary, hold trailing partial word
+    – If not found: hold entire buffer (partial word — wait for next chunk)
+    – Committed text: segment + distribute proportional duration + enqueue
 
 stvSpeechChunk (more chunks)                    ← additional chunks queue up
        │
        ▼
-  • New segments appended to queue
+  • Buffer accumulates; partial words complete when next chunk provides space
   • Timer-based drain continues sequentially
 
 stvFinishedGenerating { speechId }              ← all chunks sent to pipeline
        │
        ▼
 CaptionManager.onGenerationComplete(speechId)
-  • Informational signal; queue continues draining naturally
+  • Flush remaining buffer (_commitServerBuffer(true)) — final word is now complete
+  • Queue continues draining naturally
 
 stvFinishedTalking { agentContent }             ← audio ends
        │
@@ -256,21 +260,27 @@ CaptionManager.interrupt()
   • Immediate fade out
 ```
 
-### Fallback Path — Heuristic (debug_stvTaskGenerated)
+### Fallback Path — Heuristic (debug_stvTaskGenerated) with Ground Truth Overlay
 
 Active when server does NOT emit `stvSpeechChunk`:
 
 ```
+generatingSpeech { text, speechId }         ← clean TTS input (optional, enables GT path)
+       │
+       ▼
+CaptionManager.onGeneratingSpeech(text, speechId)
+  • Store in _groundTruth Map (keyed by speechId, concatenated)
+
 debug_stvTaskGenerated { text, speechId }   ← text chunks arrive BEFORE audio
        │
        ▼
 CaptionManager.onChunk(delta, speechId)
   • Strip SSML tags (<break>, etc.) from delta
-  • _textBuffer += cleaned delta
+  • If GT exists for speechId: advance through GT by non-ws char count, set _textBuffer = GT slice
+  • If no GT: heuristic space insertion (tail/head fragment ≤2 chars = mid-word)
   • If new speechId AND buffer is empty: emit 'caption-start' (new response)
   • If new speechId AND buffer has content: continue (same utterance, server rotated ID)
   • _appendNewSegments(): commit text up to last sentence boundary
-    (segments are APPEND-ONLY — never rebuilt or mutated)
 
 stvStartedTalking                           ← audio playback begins
        │
@@ -293,7 +303,8 @@ stvFinishedTalking { agentContent }         ← audio ends
        ▼
 CaptionManager.onSpeakingEnd(fullText)
   • Stop tick
-  • Flush remaining uncommitted text from own buffer (NOT replaced by fullText)
+  • If no chunks arrived at all: segment fullText as complete fallback (start + show all at once)
+  • Otherwise: flush remaining uncommitted text from buffer
   • Show all unseen segments immediately
   • Calibrate rate using fullText length (authoritative) / actualDuration → EMA α=0.3
   • Emit 'caption-end'
@@ -303,12 +314,16 @@ CaptionManager.onSpeakingEnd(fullText)
 ### Source Priority
 
 When `stvSpeechChunk` fires, the CaptionManager enters server-timed mode for that response. In this mode:
-- `onChunk()` calls from `debug_stvTaskGenerated` are suppressed (caption timing only)
+- `onChunk()` calls from `debug_stvTaskGenerated` are suppressed (gated by `isServerTimed()`)
 - `onSpeakingStart()` is a no-op (no tick needed — timers are authoritative)
 - `debug_stvTaskGenerated` still fires `avatar-text-ready` events and command checks
 - The heuristic rate estimator is still calibrated at speaking-end for future fallback use
+- **Race handling:** The first `debug_stvTaskGenerated` may arrive before the first `stvSpeechChunk` (advancing the GT cursor via `onChunk`). When server-timed takes over, the GT cursor is reset to 0 so the full text is read from the beginning. If the session was reset mid-speechId (e.g., avatar said "Great!" then continues), the `!_active` guard reinitializes the full server-timed state.
 
 **Key design decisions:**
+- **Word-boundary buffering (server-timed path):** ElevenLabs TTS splits at internal byte boundaries, not linguistic boundaries — producing mid-word splits like `"B"` + `"2 level,"`. The server-timed path buffers incoming text and only commits up to the last whitespace boundary. Trailing partial words are held until the next chunk completes them or `onGenerationComplete`/`onSpeakingEnd` flushes. Duration is redistributed proportionally by character count — total committed duration always equals total received duration (no drift). Maximum added latency: one chunk duration (~100-500ms).
+- **Ground truth overlay (generatingSpeech):** When the server emits `generatingSpeech` events, the CaptionManager stores the clean pre-TTS text keyed by speechId in a `_groundTruth` Map. Both `onChunk` and `onServerChunk` call `_advanceGT(rawText)` which advances through the GT by counting non-whitespace characters in the raw chunk, then returns the corresponding GT slice (preserving original spacing and punctuation). This eliminates all heuristic guesswork — word boundaries come directly from the TTS input text. Falls back gracefully when GT is unavailable. The GT map is capped at 10 entries and cleared on `_reset()`.
+- **Space insertion (heuristic fallback):** Backend delta mode sometimes omits whitespace between chunks, causing word merges like `"aboutI"`, `"videoexperiences"`. The heuristic path inserts a space at chunk boundaries using tail/head fragment analysis (≤2 char fragments treated as mid-word continuations). Only active when no ground truth is available for the current speechId.
 - **Append-only segments:** `_segments[]` is never rebuilt. Once a segment is committed it never changes. This eliminates display-index drift that caused skipped content.
 - **Commit boundary:** `_commitBoundary` tracks how many chars of `_textBuffer` have been consumed into segments. Only text up to the last sentence boundary is committed (incomplete trailing text waits for more chunks).
 - **SpeechId continuity:** The server may rotate speechId mid-utterance (observed: 3 IDs per single greeting). If `onChunk` sees a new speechId but the buffer already has content, it continues accumulating (same utterance). Only an empty buffer signals a truly new response.
