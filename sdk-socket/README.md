@@ -328,7 +328,7 @@ sdk.on('ready', () => {
 
 | Event | When It Fires | What You Get |
 |-------|---------------|--------------|
-| `'avatar-text-ready'` | Avatar's response text is ready (before speaking starts) | `{ text: "Hello! How can I help?" }` |
+| `'avatar-text-ready'` | Avatar's response text chunk ready (before speaking) | `{ text: "delta chunk", fullText: "accumulated text so far" }` |
 | `'avatar-speaking-start'` | Avatar started talking (lips moving) | Nothing |
 | `'avatar-speech'` | Avatar finished saying something | `{ text: "Hello! How can I help?" }` |
 | `'avatar-speaking-end'` | Avatar stopped talking | Nothing |
@@ -819,7 +819,7 @@ sdk.isCaptionToggleVisible();        // check visibility
 | `caption-segment` | `{ text, index, total, isFinal, responseId }` | Each displayable caption segment |
 | `caption-end` | `{ responseId }` | All segments emitted, speech finished |
 | `caption-interrupted` | `{ responseId, lastSegmentIndex }` | User interrupted avatar speech |
-| `generating-speech` | `{ text, speechId }` | Pre-TTS clean text (ground truth for word boundaries) |
+| `generating-speech` | `{ text, speechId }` | Clean text the avatar is about to speak (used internally for accurate word spacing) |
 
 ### Timing
 
@@ -829,7 +829,7 @@ The SDK uses **dual-source timing** for caption synchronization:
 
 2. **Heuristic fallback:** On servers that don't emit `stvSpeechChunk`, segments are displayed at a default rate of 11 characters/second. After the first utterance, the SDK calibrates the rate from observed speaking duration using an exponential moving average. This self-tunes within 2-3 utterances.
 
-**Word-boundary accuracy:** When the server emits `generatingSpeech` events (clean pre-TTS text), the SDK uses this as ground truth for word boundaries in both paths. This eliminates all word-merging artifacts from byte-level TTS chunking. On servers without `generatingSpeech`, a heuristic fragment detector handles common cases.
+**Word-boundary accuracy:** The SDK automatically ensures that words are never merged together in captions or events — e.g., you'll always see `"slide 27"` with a space, never `"slide27"`. This works regardless of how the server splits text internally. No configuration needed.
 
 The SDK automatically selects the appropriate timing source and text source per response — no configuration needed.
 

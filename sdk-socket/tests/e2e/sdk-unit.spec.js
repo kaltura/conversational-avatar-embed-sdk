@@ -729,6 +729,103 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────
+  // _beforeBuffer WHITESPACE NORMALIZATION
+  // ────────────────────────────────────────────────────────────────────
+
+  test('delta chunks without space produce correct fullText via _needsSpaceBetween', async () => {
+    const result = await page.evaluate(() => {
+      const { _needsSpaceBetween } = KalturaAvatarSDK._internals;
+      let buffer = '';
+      const chunks = ['Navigating to slide', '27. We are now looking'];
+      for (const chunk of chunks) {
+        if (buffer.length > 0 && chunk.length > 0 && _needsSpaceBetween(buffer, chunk)) {
+          buffer += ' ';
+        }
+        buffer += chunk;
+      }
+      return buffer;
+    });
+    expect(result).toBe('Navigating to slide 27. We are now looking');
+  });
+
+  test('command match.text has word boundaries with delta chunks', async () => {
+    const result = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const { CommandRegistry, TypedEventEmitter, _needsSpaceBetween } = KalturaAvatarSDK._internals;
+        const emitter = new TypedEventEmitter();
+        const cr = new CommandRegistry(emitter);
+        let firedText = null;
+        cr.register('nav', /slide\s+(\d+)/, (m) => { firedText = m.text; }, { timing: 'before', debounce: 50 });
+
+        let buffer = '';
+        const chunks = ['Navigating to slide', '27. Here we can see'];
+        for (const chunk of chunks) {
+          if (buffer.length > 0 && chunk.length > 0 && _needsSpaceBetween(buffer, chunk)) {
+            buffer += ' ';
+          }
+          buffer += chunk;
+          cr.check(buffer, 'before');
+        }
+        setTimeout(() => resolve(firedText), 100);
+      });
+    });
+    expect(result).not.toBeNull();
+    expect(result).toContain('slide 27');
+    expect(/slide\s+(\d+)/.exec(result)[1]).toBe('27');
+  });
+
+  test('cumulative mode does not double-space (server already includes spaces)', async () => {
+    const result = await page.evaluate(() => {
+      const { _needsSpaceBetween } = KalturaAvatarSDK._internals;
+      let buffer = '';
+      // Cumulative: each chunk is the full text so far (server adds spaces)
+      const chunks = ['Hello ', 'Hello world', 'Hello world again'];
+      for (const chunk of chunks) {
+        if (chunk.startsWith(buffer) && chunk.length >= buffer.length) {
+          buffer = chunk; // cumulative assignment, no concat
+        } else {
+          if (buffer.length > 0 && chunk.length > 0 && _needsSpaceBetween(buffer, chunk)) {
+            buffer += ' ';
+          }
+          buffer += chunk;
+        }
+      }
+      return buffer;
+    });
+    expect(result).toBe('Hello world again');
+  });
+
+  test('multiple consecutive deltas all get spaces inserted', async () => {
+    const result = await page.evaluate(() => {
+      const { _needsSpaceBetween } = KalturaAvatarSDK._internals;
+      let buffer = '';
+      const chunks = ['Navigating', 'to', 'slide', '27'];
+      for (const chunk of chunks) {
+        if (buffer.length > 0 && chunk.length > 0 && _needsSpaceBetween(buffer, chunk)) {
+          buffer += ' ';
+        }
+        buffer += chunk;
+      }
+      return buffer;
+    });
+    expect(result).toBe('Navigating to slide 27');
+  });
+
+  test('whitespace-leading delta does not produce double space', async () => {
+    const result = await page.evaluate(() => {
+      const { _needsSpaceBetween } = KalturaAvatarSDK._internals;
+      let buffer = 'hello';
+      const delta = ' world';
+      if (buffer.length > 0 && delta.length > 0 && _needsSpaceBetween(buffer, delta)) {
+        buffer += ' ';
+      }
+      buffer += delta;
+      return buffer;
+    });
+    expect(result).toBe('hello world');
+  });
+
+  // ────────────────────────────────────────────────────────────────────
   // DPP MANAGER
   // ────────────────────────────────────────────────────────────────────
 

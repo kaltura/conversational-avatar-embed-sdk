@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.7.0
+ * @version 2.7.1
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.7.0';
+  const VERSION = '2.7.1';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -237,6 +237,14 @@
         (err) => { clearTimeout(timer); reject(err); }
       );
     });
+  }
+
+  function _needsSpaceBetween(left, right) {
+    if (!left || !right) return false;
+    const lc = left.charCodeAt(left.length - 1);
+    const fc = right.charCodeAt(0);
+    return lc !== 32 && lc !== 9 && lc !== 10 && lc !== 13 &&
+           fc !== 32 && fc !== 9 && fc !== 10 && fc !== 13;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1268,8 +1276,7 @@
       if (!text || !speechId) return;
       const existing = this._groundTruth.get(speechId) || '';
       const needsSpace = existing.length > 0 && text.length > 0 &&
-        !this._isWs(existing.charCodeAt(existing.length - 1)) &&
-        !this._isWs(text.charCodeAt(0));
+        _needsSpaceBetween(existing, text);
       this._groundTruth.set(speechId, existing + (needsSpace ? ' ' : '') + text);
       if (this._groundTruth.size > 10) {
         const first = this._groundTruth.keys().next().value;
@@ -3733,13 +3740,14 @@
           await this._handlePermissions(data?.constraints);
         });
 
-        // Avatar speech
+        // Avatar speech — GT-backed text assembly for commands and events
         let _beforeBuffer = '';
+        let _beforeGT = '';
+        let _beforeGTConsumed = 0;
+        let _beforeSpeechId = null;
 
         this._socket.on('debug_stvTaskGenerated', (data) => {
           if (data?.text) {
-            // Server may send cumulative text (full response so far) OR just the new delta.
-            // Detect which mode and extract the delta accordingly.
             let delta;
             if (data.text.startsWith(_beforeBuffer) && data.text.length >= _beforeBuffer.length) {
               // Cumulative: server sent the full text so far
@@ -3748,7 +3756,26 @@
             } else {
               // Delta: server sent only the new fragment
               delta = data.text;
-              _beforeBuffer += data.text;
+              // Use GT overlay when available for correct word boundaries
+              if (_beforeGT && _beforeGTConsumed < _beforeGT.length) {
+                const deltaChars = delta.replace(/\s+/g, '').length;
+                let matched = 0;
+                let end = _beforeGTConsumed;
+                while (matched < deltaChars && end < _beforeGT.length) {
+                  const ch = _beforeGT.charCodeAt(end);
+                  if (ch !== 32 && ch !== 9 && ch !== 10 && ch !== 13) matched++;
+                  end++;
+                }
+                _beforeBuffer = _beforeGT.slice(0, end);
+                _beforeGTConsumed = end;
+              } else {
+                // Fallback: heuristic space insertion when GT not yet available
+                if (_beforeBuffer.length > 0 && delta.length > 0 &&
+                    _needsSpaceBetween(_beforeBuffer, delta)) {
+                  _beforeBuffer += ' ';
+                }
+                _beforeBuffer += delta;
+              }
             }
             this._commands.check(_beforeBuffer, 'before');
             this._emitter.emit(Events.AVATAR_TEXT_READY, { text: delta, fullText: _beforeBuffer });
@@ -3768,10 +3795,31 @@
         });
 
         // generatingSpeech: clean text sent to TTS (before byte-level chunking).
-        // Feeds ground truth to CaptionManager for accurate word boundaries.
+        // Feeds ground truth to CaptionManager AND _beforeBuffer for accurate word boundaries.
         this._socket.on('generatingSpeech', (data) => {
           if (data?.text && data?.speechId) {
             this._captions.onGeneratingSpeech(data.text, data.speechId);
+            // Accumulate GT for _beforeBuffer overlay
+            if (_beforeSpeechId !== data.speechId) {
+              _beforeSpeechId = data.speechId;
+              _beforeGT = '';
+              _beforeGTConsumed = 0;
+            }
+            const needsSpace = _beforeGT.length > 0 && data.text.length > 0 &&
+              _needsSpaceBetween(_beforeGT, data.text);
+            _beforeGT += (needsSpace ? ' ' : '') + data.text;
+            // Sync GT cursor to already-consumed content in _beforeBuffer
+            if (_beforeGTConsumed === 0 && _beforeBuffer.length > 0) {
+              const bufChars = _beforeBuffer.replace(/\s+/g, '').length;
+              let matched = 0;
+              let pos = 0;
+              while (matched < bufChars && pos < _beforeGT.length) {
+                const ch = _beforeGT.charCodeAt(pos);
+                if (ch !== 32 && ch !== 9 && ch !== 10 && ch !== 13) matched++;
+                pos++;
+              }
+              _beforeGTConsumed = pos;
+            }
           }
           this._emitter.emit('generating-speech', { text: data?.text, speechId: data?.speechId });
         });
@@ -3788,6 +3836,9 @@
 
         this._socket.on('stvFinishedTalking', (data) => {
           _beforeBuffer = '';
+          _beforeGT = '';
+          _beforeGTConsumed = 0;
+          _beforeSpeechId = null;
           this._avatarSpeaking = false;
           this._emitter.emit(Events.AVATAR_SPEAKING_END);
           if (data?.agentContent) {
@@ -4169,7 +4220,7 @@
 
   // Expose internals for advanced use and testing
   KalturaAvatarSDK.AvatarError = AvatarError;
-  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, QueueManager, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader, CaptionManager, CaptionSegmenter, CaptionScheduler, CaptionRateEstimator, CaptionRenderer, CaptionFilter };
+  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, QueueManager, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader, CaptionManager, CaptionSegmenter, CaptionScheduler, CaptionRateEstimator, CaptionRenderer, CaptionFilter, _needsSpaceBetween };
 
   return KalturaAvatarSDK;
 }));
