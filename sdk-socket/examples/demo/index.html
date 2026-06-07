@@ -241,10 +241,11 @@ function connect() {
         captions: { enabled: captionsEnabled }
     };
     if (serverUrl) {
-        var region = serverUrl.match(/avatar\.(\w+)\.kaltura/);
-        var whepUrl = region ? 'https://srs.avatar.' + region[1] + '.kaltura.ai' : null;
+        // Only the socket endpoint is needed. The WHEP media URL is provided
+        // per-session by the server (it load-balances across SRS origins), so
+        // we must NOT pin endpoints.whep here — that would override the
+        // server's origin selection and break video/audio.
         sdkConfig.endpoints = { socket: serverUrl };
-        if (whepUrl) sdkConfig.endpoints.whep = whepUrl;
     }
 
     sdk = new KalturaAvatarSDK(sdkConfig);

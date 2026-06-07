@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.7.1
+ * @version 2.7.2
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.7.1';
+  const VERSION = '2.7.2';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -1827,11 +1827,32 @@
       this._pc = null;
       this._videoElement = null;
       this._audioElement = null;
+      this._whepUrl = null;
     }
 
     get peerConnection() { return this._pc; }
     get videoElement() { return this._videoElement; }
     set onConnectionLost(fn) { this._onConnectionLost = fn; }
+
+    // Full per-session WHEP URL from the server's stvNewSession response. The
+    // server picks one of several SRS origins per session, so this URL points
+    // at the specific origin hosting this session's stream.
+    setWhepUrl(url) { this._whepUrl = url; }
+
+    // Resolve the WHEP endpoint, in priority order:
+    //   1. Server-provided per-session URL from stvNewSession (authoritative —
+    //      the server load-balances media across multiple SRS origins and only
+    //      this URL points at the origin actually hosting this session's stream)
+    //   2. Explicit endpoints.whep host override (self-hosted / proxied setups,
+    //      used only when the server didn't supply a URL)
+    //   3. Default host built from sessionId (legacy fallback)
+    _resolveWhepUrl(sessionId) {
+      if (this._whepUrl) {
+        return this._whepUrl;
+      }
+      const base = this._config.endpoints?.whep || DEFAULTS.WHEP_URL;
+      return `${base}/rtc/v1/whep/?app=app&stream=${sessionId}`;
+    }
 
     _buildIceServers() {
       const host = deriveTurnHost(this._config.endpoints?.socket);
@@ -1899,8 +1920,7 @@
 
       await this._waitForIceGathering();
 
-      const whepBase = this._config.endpoints?.whep || DEFAULTS.WHEP_URL;
-      const whepUrl = `${whepBase}/rtc/v1/whep/?app=app&stream=${sessionId}`;
+      const whepUrl = this._resolveWhepUrl(sessionId);
 
       const resp = await fetch(whepUrl, {
         method: 'POST',
@@ -3101,7 +3121,11 @@
         endpoints: Object.freeze({
           socket: config.endpoints?.socket || DEFAULTS.SOCKET_URL,
           socketPath: config.endpoints?.socketPath || DEFAULTS.SOCKET_PATH,
-          whep: config.endpoints?.whep || DEFAULTS.WHEP_URL,
+          // whep stays null unless the user explicitly overrides it. The WHEP
+          // host normally comes from the server's per-session webrtc_url (it
+          // load-balances media across multiple SRS origins). A non-null value
+          // here forces that host instead — for self-hosted/advanced setups.
+          whep: config.endpoints?.whep || null,
           ...(config.endpoints || {})
         }),
         turn: Object.freeze({
@@ -3199,6 +3223,7 @@
       this._audioElement = null;
       this._avatarSpeaking = false;
       this._userSpeaking = false;
+      this._textTurnActive = false;
       this._intentionalDisconnect = false;
       this._conversationStartedAt = 0;
       this._timeRemaining = null;
@@ -3333,27 +3358,34 @@
     sendText(text) {
       this._state.assertState(State.IN_CONVERSATION);
       if (!text || typeof text !== 'string') return;
-      if (this._avatarSpeaking) {
-        this._socket.emit('tapToTalkStart', {});
-      }
-      this._socket.emit('debug_text_entered', {
-        isFinal: true, text,
-        room_id: this._roomId, session_id: this._sessionId
-      });
-      if (this._avatarSpeaking) {
-        this._socket.emit('tapToTalkEnd', {});
-      }
+      this._beginTextTurn();
+      this._emitTextSegment(text, true);
+      this._textTurnActive = false;
       this._log.debug('Text sent', text);
     }
 
     sendTextPartial(text) {
       this._state.assertState(State.IN_CONVERSATION);
       if (!text || typeof text !== 'string') return;
-      if (this._avatarSpeaking) {
-        this._socket.emit('tapToTalkStart', {});
-      }
-      this._socket.emit('debug_text_entered', {
-        isFinal: false, text,
+      this._beginTextTurn();
+      this._emitTextSegment(text, false);
+    }
+
+    // Open a text turn by emitting a speech-start signal once, mirroring the
+    // ASR START_SPEECH pattern. The server uses this to interrupt the avatar if
+    // it is currently talking (so typing mid-speech behaves like talking over).
+    _beginTextTurn() {
+      if (this._textTurnActive) return;
+      this._textTurnActive = true;
+      this._socket.emit('onTextEntered', {
+        isSpeechStart: true, text: '', isFinal: false,
+        room_id: this._roomId, session_id: this._sessionId
+      });
+    }
+
+    _emitTextSegment(text, isFinal) {
+      this._socket.emit('onTextEntered', {
+        isFinal, text,
         room_id: this._roomId, session_id: this._sessionId
       });
     }
@@ -3723,7 +3755,14 @@
         this._socket.on('stvNewSession', (data) => {
           if (data?.session_id) {
             this._sessionId = data.session_id;
-            this._log.debug('Session created', this._sessionId);
+            // Server load-balances media across multiple SRS origin servers and
+            // returns the full per-session WHEP URL. Honor it — the stream only
+            // exists on the origin the server selected for this session.
+            if (data.webrtc_url) {
+              this._whepUrl = data.webrtc_url;
+              this._whep.setWhepUrl(data.webrtc_url);
+            }
+            this._log.debug('Session created', this._sessionId, this._whepUrl || '(default WHEP host)');
             this._startMedia();
           }
         });
@@ -4196,6 +4235,7 @@
       this._sessionId = null;
       this._avatarSpeaking = false;
       this._userSpeaking = false;
+      this._textTurnActive = false;
       this._socketConnected = false;
       this._queue.reset();
       this._captions.interrupt();

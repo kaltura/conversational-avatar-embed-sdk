@@ -420,6 +420,22 @@ Sent in the `stvNewSession` payload. Tells the server which video ingest pipelin
 - The client never sends or receives RTMP directly — it's purely server-side between the face renderer and the SRS origin.
 - WHEP means the client only needs a standard WebRTC receive connection — no media server SDK, no RTMP client.
 
+### WHEP URL resolution (multi-origin SRS)
+
+The server load-balances avatar media across **multiple SRS origin servers** (e.g. `srs-origin-001..010`). For each session it picks one origin, publishes that session's video there, and returns the full per-session playback URL as `webrtc_url` in the `stvNewSession` response:
+
+```
+{ session_id, status, webrtc_url: "https://srs-origin-003.avatar.us.kaltura.ai/rtc/v1/whep/?app=app&stream=<session_id>" }
+```
+
+**The client MUST use this `webrtc_url`.** The stream only exists on the origin the server selected — querying any other SRS host returns a valid SDP answer but no media (tracks stay `muted`, `videoWidth: 0`). `WHEPClient._resolveWhepUrl()` resolves the endpoint in priority order:
+
+1. **Server-provided `webrtc_url`** (authoritative — set via `setWhepUrl()` when `stvNewSession` arrives). Always wins when present.
+2. **`config.endpoints.whep` host** — only a fallback for backends that don't send `webrtc_url` (legacy/self-hosted/proxied). Do **not** pin this to a regional base in normal use — it would shadow the per-session origin if the SDK ever fails to capture the server URL.
+3. **`DEFAULTS.WHEP_URL`** — last-resort hardcoded host.
+
+This is why captions can work while video/audio is black: captions arrive over Socket.IO (origin-independent), but WHEP media is origin-specific. A regression here surfaces as "captions yes, video no."
+
 ### ASR (Automatic Speech Recognition) WebRTC
 
 After `approvedPermissions`, the SDK establishes a second, independent WebRTC peer connection specifically for sending the user's microphone audio to the server:
@@ -450,6 +466,17 @@ Client (send-only)  ──── WebRTC audio track ────►  Server (ASR
 6. Connection established — audio flows, server begins transcription
 
 **Resilience:** If ASR fails (timeout, ICE failure, no mic), the SDK continues without speech recognition — the user can still interact via `sdk.sendText()`. ASR failure is non-fatal and logged as a warning.
+
+### Text input (`sendText` / `sendTextPartial`)
+
+Typed input is sent over Socket.IO via the **`onTextEntered`** event — it mirrors the ASR transcript pattern so typing behaves exactly like talking:
+
+1. A **speech-start** signal opens the turn: `onTextEntered { isSpeechStart: true, text: '', isFinal: false }`. The server uses this to interrupt the avatar if it is currently talking (so typing mid-speech is "talking over").
+2. One or more text segments follow: `onTextEntered { text, isFinal }`. `sendTextPartial()` emits `isFinal: false`; `sendText()` emits `isFinal: true` and closes the turn.
+
+`_textTurnActive` ensures the speech-start is emitted only once per turn, even across multiple `sendTextPartial()` calls before the final `sendText()`.
+
+> **Event name:** the server renamed this event from `debug_text_entered` → `onTextEntered` (conversation-manager PR #1993, June 2026). Older SDK builds that still emit `debug_text_entered` will appear to connect and show captions/video but get **no response to typed input** — the server silently ignores the unknown event.
 
 ---
 
@@ -683,4 +710,5 @@ See [`plugins/kava-analytics/README.md`](plugins/kava-analytics/README.md) for f
 | Intro speech clipped | `approvedPermissions` fired before video ready | Wait for canplay + 300ms |
 | Avatar freezes on contact request | Server waits for `contactInfoReceived`/`Rejected` | Always provide submit AND skip path |
 | GenUI video triggers "are you there" | Server silence detection fires during video | Mute mic + pause conversation |
+| Captions work but video/audio is black | WHEP hit wrong SRS origin; stream lives on the server-selected origin | Use `webrtc_url` from `stvNewSession`; never pin `endpoints.whep` to a regional base |
 | Tests fail on `check()` without phase | `check(text)` defaults to `'after'` | Always pass phase explicitly in new code |

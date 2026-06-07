@@ -101,6 +101,70 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
     expect(result.code).toBe(3001);
   });
 
+  test('sendText emits onTextEntered with speech-start then final segment', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const emits = [];
+      sdk._socket = { emit: (ev, payload) => emits.push({ ev, payload }), on(){}, off(){}, disconnect(){}, removeAllListeners(){}, close(){} };
+      sdk._state.transition('connecting');
+      sdk._state.transition('connected');
+      sdk._state.transition('joining');
+      sdk._state.transition('joined');
+      sdk._state.transition('in-conversation');
+      sdk.sendText('What is 2 plus 2?');
+      sdk.destroy();
+      return emits;
+    });
+    // Expect: speech-start signal first, then the final text segment.
+    expect(result.length).toBe(2);
+    expect(result[0].ev).toBe('onTextEntered');
+    expect(result[0].payload.isSpeechStart).toBe(true);
+    expect(result[1].ev).toBe('onTextEntered');
+    expect(result[1].payload.isFinal).toBe(true);
+    expect(result[1].payload.text).toBe('What is 2 plus 2?');
+  });
+
+  test('sendText never emits the legacy debug_text_entered event', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const emits = [];
+      sdk._socket = { emit: (ev, payload) => emits.push({ ev, payload }), on(){}, off(){}, disconnect(){}, removeAllListeners(){}, close(){} };
+      sdk._state.transition('connecting');
+      sdk._state.transition('connected');
+      sdk._state.transition('joining');
+      sdk._state.transition('joined');
+      sdk._state.transition('in-conversation');
+      sdk.sendText('hello');
+      sdk.destroy();
+      return emits.map(e => e.ev);
+    });
+    expect(result).not.toContain('debug_text_entered');
+    expect(result.every(ev => ev === 'onTextEntered')).toBe(true);
+  });
+
+  test('sendTextPartial emits speech-start once across multiple partials', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
+      const emits = [];
+      sdk._socket = { emit: (ev, payload) => emits.push({ ev, payload }), on(){}, off(){}, disconnect(){}, removeAllListeners(){}, close(){} };
+      sdk._state.transition('connecting');
+      sdk._state.transition('connected');
+      sdk._state.transition('joining');
+      sdk._state.transition('joined');
+      sdk._state.transition('in-conversation');
+      sdk.sendTextPartial('What is');
+      sdk.sendTextPartial('What is 2');
+      sdk.sendText('What is 2 plus 2?');
+      sdk.destroy();
+      return emits;
+    });
+    // One speech-start, then 3 segments (2 partial + 1 final) = 4 emits total.
+    const speechStarts = result.filter(e => e.payload.isSpeechStart);
+    expect(speechStarts.length).toBe(1);
+    expect(result.length).toBe(4);
+    expect(result[result.length - 1].payload.isFinal).toBe(true);
+  });
+
   test('injectDPP throws in wrong state', async () => {
     const result = await page.evaluate(() => {
       const sdk = new KalturaAvatarSDK({ clientId: '123', flowId: 'f' });
@@ -3230,5 +3294,76 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
       return res;
     });
     expect(result).toEqual({ clientId: 'my-client-123', flowId: 'agent-42' });
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // WHEP URL RESOLUTION (multi-origin SRS — server picks origin per session)
+  // ────────────────────────────────────────────────────────────────────
+
+  test('WHEP URL defaults to hardcoded host when server sends no webrtc_url', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: 'test', flowId: 'test' });
+      const url = sdk._whep._resolveWhepUrl('sess-abc');
+      sdk.destroy();
+      return url;
+    });
+    expect(result).toBe('https://srs.avatar.us.kaltura.ai/rtc/v1/whep/?app=app&stream=sess-abc');
+  });
+
+  test('WHEP URL uses server-provided webrtc_url verbatim (correct SRS origin)', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: 'test', flowId: 'test' });
+      const serverUrl = 'https://srs-origin-003.avatar.us.kaltura.ai/rtc/v1/whep/?app=app&stream=sess-xyz';
+      sdk._whep.setWhepUrl(serverUrl);
+      const url = sdk._whep._resolveWhepUrl('sess-xyz');
+      sdk.destroy();
+      return url;
+    });
+    expect(result).toBe('https://srs-origin-003.avatar.us.kaltura.ai/rtc/v1/whep/?app=app&stream=sess-xyz');
+  });
+
+  test('server-provided webrtc_url wins over endpoints.whep base (load-balanced origin is authoritative)', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({
+        clientId: 'test', flowId: 'test',
+        // A regional base is a common, sensible config — but it must NOT defeat
+        // the server's per-session origin selection.
+        endpoints: { whep: 'https://srs.avatar.us.kaltura.ai' }
+      });
+      sdk._whep.setWhepUrl('https://srs-origin-007.avatar.us.kaltura.ai/rtc/v1/whep/?app=app&stream=sess-1');
+      const url = sdk._whep._resolveWhepUrl('sess-1');
+      sdk.destroy();
+      return url;
+    });
+    expect(result).toBe('https://srs-origin-007.avatar.us.kaltura.ai/rtc/v1/whep/?app=app&stream=sess-1');
+  });
+
+  test('endpoints.whep base is used as fallback when server sends no webrtc_url', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({
+        clientId: 'test', flowId: 'test',
+        endpoints: { whep: 'https://my-self-hosted-srs.example.com' }
+      });
+      // No setWhepUrl — simulates a backend that doesn't supply webrtc_url.
+      const url = sdk._whep._resolveWhepUrl('sess-1');
+      sdk.destroy();
+      return url;
+    });
+    expect(result).toBe('https://my-self-hosted-srs.example.com/rtc/v1/whep/?app=app&stream=sess-1');
+  });
+
+  test('stvNewSession handler stores server webrtc_url on the WHEP client', async () => {
+    const result = await page.evaluate(() => {
+      const sdk = new KalturaAvatarSDK({ clientId: 'test', flowId: 'test' });
+      // Simulate the server's stvNewSession payload reaching the WHEP client.
+      const serverUrl = 'https://srs-origin-005.avatar.us.kaltura.ai/rtc/v1/whep/?app=app&stream=sess-555';
+      sdk._whep.setWhepUrl(serverUrl);
+      const stored = sdk._whep._whepUrl;
+      const resolved = sdk._whep._resolveWhepUrl('sess-555');
+      sdk.destroy();
+      return { stored, resolved };
+    });
+    expect(result.stored).toBe('https://srs-origin-005.avatar.us.kaltura.ai/rtc/v1/whep/?app=app&stream=sess-555');
+    expect(result.resolved).toBe(result.stored);
   });
 });

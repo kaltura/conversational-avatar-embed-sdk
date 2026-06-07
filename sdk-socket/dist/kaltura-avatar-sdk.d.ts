@@ -43,7 +43,12 @@ export interface EndpointConfig {
   socket: string;
   /** Socket.IO path */
   socketPath: string;
-  /** WHEP video server URL */
+  /**
+   * WHEP video server base URL. Fallback only — the server normally provides
+   * the per-session media URL (it load-balances across SRS origins). Pin this
+   * only for self-hosted/proxied setups; a regional base here is ignored when
+   * the server supplies a per-session URL.
+   */
   whep: string;
 }
 
