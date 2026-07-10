@@ -1,5 +1,5 @@
 [
-  { "checkId": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring", "line": 330 },
-  { "checkId": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring", "line": 339 },
-  { "checkId": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring", "line": 693 }
+  { "checkId": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring", "line": 332 },
+  { "checkId": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring", "line": 341 },
+  { "checkId": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring", "line": 695 }
 ]

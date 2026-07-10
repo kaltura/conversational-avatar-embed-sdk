@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.7.3
+ * @version 2.7.4
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.7.3';
+  const VERSION = '2.7.4';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -227,16 +227,18 @@
     return result;
   }
 
-  function withTimeout(promise, ms, label) {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new AvatarError(ErrorCode.CONNECTION_TIMEOUT, `${label} timed out after ${ms}ms`, { recoverable: true }));
-      }, ms);
-      promise.then(
-        (val) => { clearTimeout(timer); resolve(val); },
-        (err) => { clearTimeout(timer); reject(err); }
-      );
-    });
+  // Advance a cursor through `gt` from `start` until `targetChars` non-whitespace
+  // chars are matched (or gt is exhausted). Shared by CaptionManager and
+  // CommandTextBuffer's GT-overlay reconciliation (see issue #2).
+  function _advanceGTCursor(gt, start, targetChars) {
+    let matched = 0;
+    let end = start;
+    while (matched < targetChars && end < gt.length) {
+      const ch = gt.charCodeAt(end);
+      if (ch !== 32 && ch !== 9 && ch !== 10 && ch !== 13) matched++;
+      end++;
+    }
+    return end;
   }
 
   function _needsSpaceBetween(left, right) {
@@ -727,21 +729,8 @@
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // COMMAND TEXT BUFFER (see issue #2)
-  // ═══════════════════════════════════════════════════════════════════════════
-
+  // Monotonic text assembly for 'before'/'both'-timing commands (issue #2).
   class CommandTextBuffer {
-    /**
-     * Dual-source, monotonic text assembly for 'before'/'both'-timing commands.
-     *
-     * Mirrors CaptionManager's PRIMARY/FALLBACK pattern: onServerChunk
-     * (stvSpeechChunk, authoritative) takes priority once seen for the current
-     * speech; onFragment (debug_stvTaskGenerated, heuristic) is suppressed
-     * after that via isServerTimed(). Both sources share one reconciliation
-     * path (_appendFragment) so the buffer never shrinks mid-utterance,
-     * regardless of event ordering or empty/whitespace-only deltas.
-     */
     constructor() {
       this.reset();
     }
@@ -754,13 +743,9 @@
       this._serverTimed = false;
     }
 
-    /** Current accumulated 'before'-timing text. */
     getText() { return this._buffer; }
-
-    /** True once onServerChunk has been used for the current speech. */
     isServerTimed() { return this._serverTimed; }
 
-    /** Feed ground-truth text (generatingSpeech) — pre-TTS clean sentence text. */
     onGeneratingSpeech(text, speechId) {
       if (!text || !speechId) return;
       if (this._speechId !== speechId) {
@@ -768,76 +753,42 @@
         this._gt = '';
         this._gtConsumed = 0;
       }
-      const needsSpace = this._gt.length > 0 && text.length > 0 &&
-        _needsSpaceBetween(this._gt, text);
-      this._gt += (needsSpace ? ' ' : '') + text;
-      // Sync GT cursor to content already consumed into _buffer by a prior
-      // sentence's chunks, so this sentence's overlay starts at the right offset.
+      if (this._gt.length > 0 && text.length > 0 && _needsSpaceBetween(this._gt, text)) this._gt += ' ';
+      this._gt += text;
       if (this._gtConsumed === 0 && this._buffer.length > 0) {
         const bufChars = this._buffer.replace(/\s+/g, '').length;
-        let matched = 0;
-        let pos = 0;
-        while (matched < bufChars && pos < this._gt.length) {
-          const ch = this._gt.charCodeAt(pos);
-          if (ch !== 32 && ch !== 9 && ch !== 10 && ch !== 13) matched++;
-          pos++;
-        }
-        this._gtConsumed = pos;
+        this._gtConsumed = _advanceGTCursor(this._gt, 0, bufChars);
       }
     }
 
-    // Monotonic-guarded append shared by both fragment sources: adopts the
-    // GT-derived slice only if strictly longer than the current buffer;
-    // otherwise extends heuristically. Never shrinks the buffer. See issue #2.
+    _append(text) {
+      if (this._buffer.length > 0 && text.length > 0 && _needsSpaceBetween(this._buffer, text)) this._buffer += ' ';
+      this._buffer += text;
+    }
+
     _appendFragment(delta) {
       if (!delta) return;
       if (this._gt && this._gtConsumed < this._gt.length) {
         const deltaChars = delta.replace(/\s+/g, '').length;
-        let matched = 0;
-        let end = this._gtConsumed;
-        while (matched < deltaChars && end < this._gt.length) {
-          const ch = this._gt.charCodeAt(end);
-          if (ch !== 32 && ch !== 9 && ch !== 10 && ch !== 13) matched++;
-          end++;
-        }
+        const end = _advanceGTCursor(this._gt, this._gtConsumed, deltaChars);
         const overlaid = this._gt.slice(0, end);
         this._gtConsumed = end;
-        if (overlaid.length > this._buffer.length) {
-          this._buffer = overlaid;
-        } else if (delta.length > 0) {
-          if (this._buffer.length > 0 && _needsSpaceBetween(this._buffer, delta)) this._buffer += ' ';
-          this._buffer += delta;
-        }
+        if (overlaid.length > this._buffer.length) this._buffer = overlaid;
+        else this._append(delta);
       } else {
-        if (this._buffer.length > 0 && delta.length > 0 && _needsSpaceBetween(this._buffer, delta)) {
-          this._buffer += ' ';
-        }
-        this._buffer += delta;
+        this._append(delta);
       }
     }
 
-    /**
-     * Feed a debug_stvTaskGenerated fragment. Ignored once a server-timed
-     * chunk has been seen for this speech (see isServerTimed). Returns the
-     * delta actually applied, for event emission.
-     */
     onFragment(text) {
       if (!text || this._serverTimed) return '';
-      let delta;
-      if (this._buffer.length > 0 && text.startsWith(this._buffer) && text.length >= this._buffer.length) {
-        // Cumulative: server sent the full text so far — only the new suffix is the delta.
-        delta = text.slice(this._buffer.length);
-      } else {
-        delta = text;
-      }
+      const delta = (this._buffer.length > 0 && text.startsWith(this._buffer) && text.length >= this._buffer.length)
+        ? text.slice(this._buffer.length)
+        : text;
       this._appendFragment(delta);
       return delta;
     }
 
-    /**
-     * Feed a stvSpeechChunk fragment (authoritative — takes priority over
-     * onFragment for the current speech). Returns the delta applied.
-     */
     onServerChunk(text) {
       if (!text) return '';
       this._serverTimed = true;
@@ -1411,12 +1362,7 @@
       const gt = this._gtKey ? this._groundTruth.get(this._gtKey) : null;
       if (!gt || gt.length <= this._gtConsumed) return null;
       const deltaLen = rawText.replace(/\s+/g, '').length;
-      let matched = 0;
-      let end = this._gtConsumed;
-      while (matched < deltaLen && end < gt.length) {
-        if (!this._isWs(gt.charCodeAt(end))) matched++;
-        end++;
-      }
+      const end = _advanceGTCursor(gt, this._gtConsumed, deltaLen);
       const slice = gt.slice(this._gtConsumed, end);
       this._gtConsumed = end;
       return slice;
@@ -3899,13 +3845,17 @@
           await this._handlePermissions(data?.constraints);
         });
 
-        // Avatar speech — GT-backed text assembly for commands and events (see issue #2)
+        // GT-backed text assembly for commands and events (see issue #2)
+        const checkBeforeCommand = (delta) => {
+          const fullText = this._commandText.getText();
+          this._commands.check(fullText, 'before');
+          this._emitter.emit(Events.AVATAR_TEXT_READY, { text: delta, fullText });
+        };
+
         this._socket.on('debug_stvTaskGenerated', (data) => {
           if (data?.text) {
             const delta = this._commandText.onFragment(data.text);
-            const fullText = this._commandText.getText();
-            this._commands.check(fullText, 'before');
-            this._emitter.emit(Events.AVATAR_TEXT_READY, { text: delta, fullText });
+            checkBeforeCommand(delta);
             // Only feed heuristic captions if server-timed path is not active
             if (!this._captions.isServerTimed()) {
               this._captions.onChunk(delta, data.speechId);
@@ -3918,15 +3868,11 @@
           if (!data) return;
           if (data.text && data.text.trim() && data.durationMs > 0) {
             this._captions.onServerChunk(data.text, data.speechId, data.durationMs);
-            const delta = this._commandText.onServerChunk(data.text);
-            const fullText = this._commandText.getText();
-            this._commands.check(fullText, 'before');
-            this._emitter.emit(Events.AVATAR_TEXT_READY, { text: delta, fullText });
+            checkBeforeCommand(this._commandText.onServerChunk(data.text));
           }
         });
 
-        // generatingSpeech: clean text sent to TTS (before byte-level chunking).
-        // Feeds ground truth to CaptionManager and CommandTextBuffer for accurate word boundaries.
+        // generatingSpeech: clean text sent to TTS — ground truth for word boundaries.
         this._socket.on('generatingSpeech', (data) => {
           if (data?.text && data?.speechId) {
             this._captions.onGeneratingSpeech(data.text, data.speechId);
