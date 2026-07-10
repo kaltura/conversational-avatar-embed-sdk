@@ -3,7 +3,7 @@
  * Direct Socket.IO + WebRTC — No iframe required
  *
  * @license MIT
- * @version 2.7.2
+ * @version 2.7.3
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
@@ -20,7 +20,7 @@
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const VERSION = '2.7.2';
+  const VERSION = '2.7.3';
 
   const State = Object.freeze({
     UNINITIALIZED: 'uninitialized',
@@ -724,6 +724,125 @@
 
     list() {
       return [...this._commands.keys()];
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // COMMAND TEXT BUFFER (see issue #2)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  class CommandTextBuffer {
+    /**
+     * Dual-source, monotonic text assembly for 'before'/'both'-timing commands.
+     *
+     * Mirrors CaptionManager's PRIMARY/FALLBACK pattern: onServerChunk
+     * (stvSpeechChunk, authoritative) takes priority once seen for the current
+     * speech; onFragment (debug_stvTaskGenerated, heuristic) is suppressed
+     * after that via isServerTimed(). Both sources share one reconciliation
+     * path (_appendFragment) so the buffer never shrinks mid-utterance,
+     * regardless of event ordering or empty/whitespace-only deltas.
+     */
+    constructor() {
+      this.reset();
+    }
+
+    reset() {
+      this._buffer = '';
+      this._gt = '';
+      this._gtConsumed = 0;
+      this._speechId = null;
+      this._serverTimed = false;
+    }
+
+    /** Current accumulated 'before'-timing text. */
+    getText() { return this._buffer; }
+
+    /** True once onServerChunk has been used for the current speech. */
+    isServerTimed() { return this._serverTimed; }
+
+    /** Feed ground-truth text (generatingSpeech) — pre-TTS clean sentence text. */
+    onGeneratingSpeech(text, speechId) {
+      if (!text || !speechId) return;
+      if (this._speechId !== speechId) {
+        this._speechId = speechId;
+        this._gt = '';
+        this._gtConsumed = 0;
+      }
+      const needsSpace = this._gt.length > 0 && text.length > 0 &&
+        _needsSpaceBetween(this._gt, text);
+      this._gt += (needsSpace ? ' ' : '') + text;
+      // Sync GT cursor to content already consumed into _buffer by a prior
+      // sentence's chunks, so this sentence's overlay starts at the right offset.
+      if (this._gtConsumed === 0 && this._buffer.length > 0) {
+        const bufChars = this._buffer.replace(/\s+/g, '').length;
+        let matched = 0;
+        let pos = 0;
+        while (matched < bufChars && pos < this._gt.length) {
+          const ch = this._gt.charCodeAt(pos);
+          if (ch !== 32 && ch !== 9 && ch !== 10 && ch !== 13) matched++;
+          pos++;
+        }
+        this._gtConsumed = pos;
+      }
+    }
+
+    // Monotonic-guarded append shared by both fragment sources: adopts the
+    // GT-derived slice only if strictly longer than the current buffer;
+    // otherwise extends heuristically. Never shrinks the buffer. See issue #2.
+    _appendFragment(delta) {
+      if (!delta) return;
+      if (this._gt && this._gtConsumed < this._gt.length) {
+        const deltaChars = delta.replace(/\s+/g, '').length;
+        let matched = 0;
+        let end = this._gtConsumed;
+        while (matched < deltaChars && end < this._gt.length) {
+          const ch = this._gt.charCodeAt(end);
+          if (ch !== 32 && ch !== 9 && ch !== 10 && ch !== 13) matched++;
+          end++;
+        }
+        const overlaid = this._gt.slice(0, end);
+        this._gtConsumed = end;
+        if (overlaid.length > this._buffer.length) {
+          this._buffer = overlaid;
+        } else if (delta.length > 0) {
+          if (this._buffer.length > 0 && _needsSpaceBetween(this._buffer, delta)) this._buffer += ' ';
+          this._buffer += delta;
+        }
+      } else {
+        if (this._buffer.length > 0 && delta.length > 0 && _needsSpaceBetween(this._buffer, delta)) {
+          this._buffer += ' ';
+        }
+        this._buffer += delta;
+      }
+    }
+
+    /**
+     * Feed a debug_stvTaskGenerated fragment. Ignored once a server-timed
+     * chunk has been seen for this speech (see isServerTimed). Returns the
+     * delta actually applied, for event emission.
+     */
+    onFragment(text) {
+      if (!text || this._serverTimed) return '';
+      let delta;
+      if (this._buffer.length > 0 && text.startsWith(this._buffer) && text.length >= this._buffer.length) {
+        // Cumulative: server sent the full text so far — only the new suffix is the delta.
+        delta = text.slice(this._buffer.length);
+      } else {
+        delta = text;
+      }
+      this._appendFragment(delta);
+      return delta;
+    }
+
+    /**
+     * Feed a stvSpeechChunk fragment (authoritative — takes priority over
+     * onFragment for the current speech). Returns the delta applied.
+     */
+    onServerChunk(text) {
+      if (!text) return '';
+      this._serverTimed = true;
+      this._appendFragment(text);
+      return text;
     }
   }
 
@@ -3210,6 +3329,7 @@
       this._audioFallback = new AudioFallback(this._config, this._log);
       this._genui = new GenUIManager(this._emitter, this._config.genui, this._log);
       this._captions = new CaptionManager(this._emitter, this._config.captions, this._log);
+      this._commandText = new CommandTextBuffer();
 
       this._serverInfo = new ServerInfo();
       this._socket = null;
@@ -3779,45 +3899,13 @@
           await this._handlePermissions(data?.constraints);
         });
 
-        // Avatar speech — GT-backed text assembly for commands and events
-        let _beforeBuffer = '';
-        let _beforeGT = '';
-        let _beforeGTConsumed = 0;
-        let _beforeSpeechId = null;
-
+        // Avatar speech — GT-backed text assembly for commands and events (see issue #2)
         this._socket.on('debug_stvTaskGenerated', (data) => {
           if (data?.text) {
-            let delta;
-            if (data.text.startsWith(_beforeBuffer) && data.text.length >= _beforeBuffer.length) {
-              // Cumulative: server sent the full text so far
-              delta = data.text.slice(_beforeBuffer.length);
-              _beforeBuffer = data.text;
-            } else {
-              // Delta: server sent only the new fragment
-              delta = data.text;
-              // Use GT overlay when available for correct word boundaries
-              if (_beforeGT && _beforeGTConsumed < _beforeGT.length) {
-                const deltaChars = delta.replace(/\s+/g, '').length;
-                let matched = 0;
-                let end = _beforeGTConsumed;
-                while (matched < deltaChars && end < _beforeGT.length) {
-                  const ch = _beforeGT.charCodeAt(end);
-                  if (ch !== 32 && ch !== 9 && ch !== 10 && ch !== 13) matched++;
-                  end++;
-                }
-                _beforeBuffer = _beforeGT.slice(0, end);
-                _beforeGTConsumed = end;
-              } else {
-                // Fallback: heuristic space insertion when GT not yet available
-                if (_beforeBuffer.length > 0 && delta.length > 0 &&
-                    _needsSpaceBetween(_beforeBuffer, delta)) {
-                  _beforeBuffer += ' ';
-                }
-                _beforeBuffer += delta;
-              }
-            }
-            this._commands.check(_beforeBuffer, 'before');
-            this._emitter.emit(Events.AVATAR_TEXT_READY, { text: delta, fullText: _beforeBuffer });
+            const delta = this._commandText.onFragment(data.text);
+            const fullText = this._commandText.getText();
+            this._commands.check(fullText, 'before');
+            this._emitter.emit(Events.AVATAR_TEXT_READY, { text: delta, fullText });
             // Only feed heuristic captions if server-timed path is not active
             if (!this._captions.isServerTimed()) {
               this._captions.onChunk(delta, data.speechId);
@@ -3830,35 +3918,19 @@
           if (!data) return;
           if (data.text && data.text.trim() && data.durationMs > 0) {
             this._captions.onServerChunk(data.text, data.speechId, data.durationMs);
+            const delta = this._commandText.onServerChunk(data.text);
+            const fullText = this._commandText.getText();
+            this._commands.check(fullText, 'before');
+            this._emitter.emit(Events.AVATAR_TEXT_READY, { text: delta, fullText });
           }
         });
 
         // generatingSpeech: clean text sent to TTS (before byte-level chunking).
-        // Feeds ground truth to CaptionManager AND _beforeBuffer for accurate word boundaries.
+        // Feeds ground truth to CaptionManager and CommandTextBuffer for accurate word boundaries.
         this._socket.on('generatingSpeech', (data) => {
           if (data?.text && data?.speechId) {
             this._captions.onGeneratingSpeech(data.text, data.speechId);
-            // Accumulate GT for _beforeBuffer overlay
-            if (_beforeSpeechId !== data.speechId) {
-              _beforeSpeechId = data.speechId;
-              _beforeGT = '';
-              _beforeGTConsumed = 0;
-            }
-            const needsSpace = _beforeGT.length > 0 && data.text.length > 0 &&
-              _needsSpaceBetween(_beforeGT, data.text);
-            _beforeGT += (needsSpace ? ' ' : '') + data.text;
-            // Sync GT cursor to already-consumed content in _beforeBuffer
-            if (_beforeGTConsumed === 0 && _beforeBuffer.length > 0) {
-              const bufChars = _beforeBuffer.replace(/\s+/g, '').length;
-              let matched = 0;
-              let pos = 0;
-              while (matched < bufChars && pos < _beforeGT.length) {
-                const ch = _beforeGT.charCodeAt(pos);
-                if (ch !== 32 && ch !== 9 && ch !== 10 && ch !== 13) matched++;
-                pos++;
-              }
-              _beforeGTConsumed = pos;
-            }
+            this._commandText.onGeneratingSpeech(data.text, data.speechId);
           }
           this._emitter.emit('generating-speech', { text: data?.text, speechId: data?.speechId });
         });
@@ -3874,10 +3946,7 @@
         });
 
         this._socket.on('stvFinishedTalking', (data) => {
-          _beforeBuffer = '';
-          _beforeGT = '';
-          _beforeGTConsumed = 0;
-          _beforeSpeechId = null;
+          this._commandText.reset();
           this._avatarSpeaking = false;
           this._emitter.emit(Events.AVATAR_SPEAKING_END);
           if (data?.agentContent) {
@@ -4260,7 +4329,7 @@
 
   // Expose internals for advanced use and testing
   KalturaAvatarSDK.AvatarError = AvatarError;
-  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, QueueManager, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader, CaptionManager, CaptionSegmenter, CaptionScheduler, CaptionRateEstimator, CaptionRenderer, CaptionFilter, _needsSpaceBetween };
+  KalturaAvatarSDK._internals = { TypedEventEmitter, StateMachine, TranscriptManager, CommandRegistry, CommandTextBuffer, QueueManager, DPPManager, WHEPClient, ASRConnection, AudioFallback, MicrophoneManager, ReconnectStrategy, Logger, GenUIManager, GenUIContainer, RendererRegistry, LibraryLoader, CaptionManager, CaptionSegmenter, CaptionScheduler, CaptionRateEstimator, CaptionRenderer, CaptionFilter, _needsSpaceBetween };
 
   return KalturaAvatarSDK;
 }));

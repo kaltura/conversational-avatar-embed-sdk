@@ -42,6 +42,7 @@ All classes are defined inside the UMD factory function (not exported individual
 | `ReconnectStrategy` | Exponential backoff with jitter |
 | `TranscriptManager` | Records speech, formats, exports |
 | `CommandRegistry` | Pattern-matching on avatar speech with timing control |
+| `CommandTextBuffer` | Dual-source, monotonic text assembly for 'before'/'both'-timing commands (server-timed `stvSpeechChunk` primary, heuristic `debug_stvTaskGenerated` fallback) |
 | `QueueManager` | Cyclic-delay availability polling when server is at capacity |
 | `CaptionFilter` | TTS word replacements + punctuation normalization for display text |
 | `DPPManager` | Validates and emits Dynamic Prompt Injection |
@@ -127,15 +128,18 @@ Server sends avatar speech in two phases:
 ```
 Server → 'generatingSpeech' (clean sentence text the avatar will speak — authoritative spacing)
 Server → 'debug_stvTaskGenerated' (raw token chunks, arrive BEFORE audio plays)
+Server → 'stvSpeechChunk' (server-timed chunks, authoritative — takes priority once seen)
        │
        ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ Detect cumulative vs. delta text                                 │
-│ Delta: use clean sentence text to reconstruct with proper spaces │
-│        (falls back to heuristic if clean text hasn't arrived)    │
-│ CommandRegistry.check(accumulatedText, 'before')                 │
+│ CommandTextBuffer.onGeneratingSpeech(text, speechId) — feeds GT   │
+│ CommandTextBuffer.onFragment(text) — heuristic path, no-op once   │
+│   onServerChunk has been used for this speech (isServerTimed)    │
+│ CommandTextBuffer.onServerChunk(text) — authoritative path,       │
+│   append-only, never shrinks the buffer (see issue #2)           │
+│ CommandRegistry.check(fullText, 'before')                        │
 │ Emit AVATAR_TEXT_READY { text: delta, fullText }                 │
-│ CaptionManager.onChunk(delta, speechId)                          │
+│ CaptionManager.onChunk(delta, speechId) — only if !isServerTimed │
 └──────────────────────────────────────────────────────────────────┘
 
 Server → 'stvStartedTalking' (avatar lips start moving)
@@ -147,7 +151,7 @@ Server → 'stvFinishedTalking' { agentContent: fullText }
        │
        ▼
 ┌─────────────────────────────────────────┐
-│ Reset accumulated text buffer            │
+│ CommandTextBuffer.reset()                │
 │ CommandRegistry.resetUtterance()        │
 │ CommandRegistry.check(text, 'after')    │
 │ TranscriptManager.add('Avatar', text)   │
@@ -157,6 +161,8 @@ Server → 'stvFinishedTalking' { agentContent: fullText }
 ```
 
 **Chunk ordering:** `debug_stvTaskGenerated` events arrive BEFORE `stvStartedTalking`. Never reset the buffer on `stvStartedTalking` — only on `stvFinishedTalking`.
+
+**Monotonicity (issue #2):** `CommandTextBuffer` never lets the 'before'-timing text shrink mid-utterance. An empty or whitespace-only `debug_stvTaskGenerated` delta racing ahead of `generatingSpeech` used to overwrite the accumulated buffer with a stale, shorter ground-truth prefix — truncating command matches (e.g. matching " now." instead of "navigating to slide 2 now."). The GT-overlay slice is now adopted only when it is strictly longer than the current buffer; otherwise the delta is appended heuristically. `stvSpeechChunk` is the authoritative source once seen for a speech — `onFragment` becomes a no-op for that speech (mirrors `CaptionManager.isServerTimed()`).
 
 ---
 
