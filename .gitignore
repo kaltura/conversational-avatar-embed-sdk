@@ -30,3 +30,6 @@ playwright-report/
 
 # Screenshots (dev-only, not committed)
 *.png
+
+# Harness run output (issue #2 verification harness — regenerated every run)
+sdk-socket/.harness-output/

@@ -3193,6 +3193,51 @@ test.describe('KalturaAvatarSDK — Unit Tests (in-browser)', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────
+  // COMMAND TEXT BUFFER (issue #2 — 'before'-timing command text assembly)
+  //
+  // ASSUMED API CONTRACT (not yet implemented — this test defines it):
+  //   new CommandTextBuffer() — one instance per KalturaAvatarSDK, mirroring
+  //     `this._captions = new CaptionManager(...)`.
+  //   onGeneratingSpeech(text, speechId) — feeds ground-truth text, mirrors
+  //     CaptionManager.onGeneratingSpeech.
+  //   onFragment(text, speechId) — feeds a debug_stvTaskGenerated delta/fragment.
+  //   getText() — returns the currently accumulated 'before'-timing text.
+  //   reset() — clears accumulated state (mirrors the _beforeBuffer/_beforeGT
+  //     reset currently done inline on stvFinishedTalking).
+  // Phase 3 implementation must satisfy this contract; the test is the source
+  // of truth, not the other way around.
+  // ────────────────────────────────────────────────────────────────────
+
+  test('CommandTextBuffer instances do not share state (isolation)', async () => {
+    const result = await page.evaluate(() => {
+      const { CommandTextBuffer } = KalturaAvatarSDK._internals;
+      const bufA = new CommandTextBuffer();
+      const bufB = new CommandTextBuffer();
+
+      // Drive A through a realistic GT + fragment sequence.
+      bufA.onGeneratingSpeech('Great! Let us begin the review.', 'sp-a');
+      bufA.onFragment('Great!', 'sp-a');
+      bufA.onFragment(' Let us begin the review.', 'sp-a');
+      const textA = bufA.getText();
+
+      // B must still be empty/unset — never touched.
+      const textB_beforeDrive = bufB.getText();
+
+      // Driving B after A must not retroactively affect A's already-accumulated text.
+      bufB.onGeneratingSpeech('Completely different content.', 'sp-b');
+      bufB.onFragment('Completely different content.', 'sp-b');
+      const textB_afterDrive = bufB.getText();
+      const textA_afterB = bufA.getText();
+
+      return { textA, textB_beforeDrive, textB_afterDrive, textA_afterB };
+    });
+    expect(result.textA.length).toBeGreaterThan(0);
+    expect(result.textB_beforeDrive).toBeFalsy();
+    expect(result.textB_afterDrive).toContain('Completely different content');
+    expect(result.textA_afterB).toBe(result.textA);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
   // TURN HOST DERIVATION & ICE SERVERS
   // ────────────────────────────────────────────────────────────────────
 

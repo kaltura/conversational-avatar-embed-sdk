@@ -19,6 +19,7 @@
   ],
   "devDependencies": {
     "@playwright/test": "^1.44.0",
+    "eslint": "^8.57.0",
     "socket.io-client": "^4.7.2"
   },
   "peerDependencies": {
@@ -30,6 +31,8 @@
     "test:analytics:live": "npx playwright test tests/e2e/analytics-live.spec.js",
     "test:live": "npx playwright test tests/e2e/live-flow.spec.js",
     "test:all": "npx playwright test",
+    "lint:deadcode": "bash scripts/harness/gate4-deadcode.sh",
+    "verify:issue-2": "bash scripts/harness/verify-issue-2.sh",
     "demo": "python3 -m http.server 8090 --directory ."
   },
   "repository": {
